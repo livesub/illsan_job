@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "102533466026",
+    "project_id": "illsan-job",
+    "storage_bucket": "illsan-job.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:102533466026:android:3f968ef0eff2aee9f18dd3",
+        "android_client_info": {
+          "package_name": "com.example.illsan_job"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBPiyOHOuxHKi3CsafkvZan3m1qn-Y1yRM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

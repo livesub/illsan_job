@@ -1,0 +1,11 @@
+# 클로드 접근 금지 구역
+build/
+ios/
+android/
+web/
+windows/
+macos/
+linux/
+.dart_tool/
+*.png
+*.jpg
