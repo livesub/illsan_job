@@ -24,9 +24,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../../core/utils/firestore_keys.dart';
+import '../../../firebase_options.dart';
 
 // ─────────────────────────────────────────────────────────
 // 교사 목록 탭
@@ -240,8 +242,7 @@ class _TeacherTabState extends State<TeacherTab> {
         ),
         content: Text(
           '"$teacherName" 교사를 삭제하시겠습니까?\n\n'
-          '삭제된 교사는 목록에서 숨겨지고 로그인이 차단됩니다.\n'
-          '(실제 계정 비활성화는 8단계 Cloud Functions 연동 후 완성됩니다.)',
+          '삭제된 교사는 목록에서 숨겨지고 Firebase Auth 계정이 즉시 비활성화됩니다.',
           style: const TextStyle(fontSize: 14, height: 1.5),
         ),
         actions: [
@@ -668,11 +669,20 @@ class _TeacherFormDialogState extends State<_TeacherFormDialog> {
       return;
     }
     setState(() => _saving = true);
+    // 관리자 세션 유지를 위해 Secondary App으로 교사 계정 생성
+    FirebaseApp? secondaryApp;
     try {
-      final credential =
-          await FirebaseAuth.instance.createUserWithEmailAndPassword(
-              email: _emailCtrl.text.trim(), password: _pwCtrl.text);
+      secondaryApp = await Firebase.initializeApp(
+        name: 'teacher_reg_${DateTime.now().millisecondsSinceEpoch}',
+        options: DefaultFirebaseOptions.currentPlatform,
+      );
+      final secondaryAuth = FirebaseAuth.instanceFor(app: secondaryApp);
+      final credential = await secondaryAuth.createUserWithEmailAndPassword(
+        email: _emailCtrl.text.trim(),
+        password: _pwCtrl.text,
+      );
       final uid = credential.user!.uid;
+      await secondaryAuth.signOut();
 
       String? photoUrl;
       if (_photoBytes != null) {
@@ -718,6 +728,8 @@ class _TeacherFormDialogState extends State<_TeacherFormDialog> {
       setState(() => _saving = false);
       ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('저장 실패: $e'), backgroundColor: Colors.red));
+    } finally {
+      await secondaryApp?.delete();
     }
   }
 
@@ -895,18 +907,21 @@ class _TeacherFormDialogState extends State<_TeacherFormDialog> {
         ),
         const SizedBox(width: 16),
         Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          OutlinedButton.icon(
-            style: OutlinedButton.styleFrom(
-                foregroundColor: _blue,
-                side: const BorderSide(color: _blue),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8)),
-                minimumSize: Size.zero,
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 14, vertical: 10)),
-            onPressed: _pickPhoto,
-            icon: const Icon(Icons.upload_rounded, size: 16),
-            label: const Text('사진 선택', style: TextStyle(fontSize: 13)),
+          Semantics(
+            label: '프로필 사진 선택 버튼입니다.',
+            child: OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                  foregroundColor: _blue,
+                  side: const BorderSide(color: _blue),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8)),
+                  minimumSize: Size.zero,
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 14, vertical: 10)),
+              onPressed: _pickPhoto,
+              icon: const Icon(Icons.upload_rounded, size: 16),
+              label: const Text('사진 선택', style: TextStyle(fontSize: 13)),
+            ),
           ),
           if (_photoFileName != null) ...[
             const SizedBox(height: 4),
@@ -1104,6 +1119,9 @@ class _TeacherEditDialogState extends State<_TeacherEditDialog> {
 
   // 비밀번호 초기화 여부 (체크 시 is_temp_password: true 플래그 설정)
   bool _resetPassword = false;
+  String _currentEmail = '';
+  // Cloud Functions이 생성한 임시 비밀번호 (Firestore temp_pw_plain 필드)
+  String? _tempPwPlain;
 
   Uint8List? _newPhotoBytes;
   String? _existingPhotoUrl;
@@ -1120,6 +1138,8 @@ class _TeacherEditDialogState extends State<_TeacherEditDialog> {
     _phoneCtrl.text = data[FsUser.phone] as String? ?? '';
     _bioCtrl.text   = data[FsUser.bio]   as String? ?? '';
     _existingPhotoUrl = data[FsUser.photoUrl] as String?;
+    _currentEmail   = data[FsUser.email] as String? ?? '';
+    _tempPwPlain    = data[FsUser.tempPwPlain] as String?;
   }
 
   @override
@@ -1184,11 +1204,16 @@ class _TeacherEditDialogState extends State<_TeacherEditDialog> {
           .doc(uid)
           .update(updateData);
 
+      // 비밀번호 초기화 시 Cloud Functions 처리 대기 후 임시 비밀번호 로드
+      if (_resetPassword) {
+        await _pollTempPassword(uid);
+      }
+
       if (!mounted) return;
       Navigator.of(context).pop(true);
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(_resetPassword
-              ? '교사 정보가 수정되었습니다. 다음 로그인 시 비밀번호 변경이 강제됩니다.'
+              ? '교사 정보가 수정되었습니다. 임시 비밀번호가 생성되었습니다.'
               : '교사 정보가 수정되었습니다.'),
           backgroundColor: const Color(0xFF00897B)));
     } catch (e) {
@@ -1196,6 +1221,24 @@ class _TeacherEditDialogState extends State<_TeacherEditDialog> {
       setState(() => _saving = false);
       ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('수정 실패: $e'), backgroundColor: Colors.red));
+    }
+  }
+
+  // Cloud Functions 처리 완료까지 최대 10초 대기 후 임시 비밀번호를 Firestore에서 읽습니다.
+  Future<void> _pollTempPassword(String uid) async {
+    for (int i = 0; i < 10; i++) {
+      await Future.delayed(const Duration(seconds: 1));
+      try {
+        final snap = await FirebaseFirestore.instance
+            .collection(FsCol.users)
+            .doc(uid)
+            .get();
+        final pw = snap.data()?[FsUser.tempPwPlain] as String?;
+        if (pw != null && pw.isNotEmpty) {
+          if (mounted) setState(() => _tempPwPlain = pw);
+          return;
+        }
+      } catch (_) {}
     }
   }
 
@@ -1264,22 +1307,54 @@ class _TeacherEditDialogState extends State<_TeacherEditDialog> {
                                   size: 32, color: _blue)
                               : null),
                       const SizedBox(width: 16),
-                      OutlinedButton.icon(
-                        style: OutlinedButton.styleFrom(
-                            foregroundColor: _blue,
-                            side: const BorderSide(color: _blue),
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8)),
-                            minimumSize: Size.zero,
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 14, vertical: 10)),
-                        onPressed: _pickPhoto,
-                        icon: const Icon(Icons.upload_rounded, size: 16),
-                        label: const Text('사진 변경',
-                            style: TextStyle(fontSize: 13)),
+                      Semantics(
+                        label: '프로필 사진 변경 버튼입니다.',
+                        child: OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                              foregroundColor: _blue,
+                              side: const BorderSide(color: _blue),
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8)),
+                              minimumSize: Size.zero,
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 14, vertical: 10)),
+                          onPressed: _pickPhoto,
+                          icon: const Icon(Icons.upload_rounded, size: 16),
+                          label: const Text('사진 변경',
+                              style: TextStyle(fontSize: 13)),
+                        ),
                       ),
                     ]),
                     const SizedBox(height: 20),
+
+                    // ── 이메일 (읽기 전용) ────────────────────
+                    _buildLabel('이메일 (변경 불가)', required: false),
+                    const SizedBox(height: 6),
+                    Semantics(
+                      label: '이메일 표시입니다. 변경할 수 없습니다.',
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 14, vertical: 14),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF5F5F5),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: const Color(0xFFE0E0E0)),
+                        ),
+                        child: Row(children: [
+                          const Icon(Icons.email_outlined,
+                              size: 16, color: Color(0xFF9E9E9E)),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              _currentEmail,
+                              style: const TextStyle(
+                                  fontSize: 14, color: Color(0xFF757575)),
+                            ),
+                          ),
+                        ]),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
 
                     // ── 이름 ─────────────────────────────────
                     _buildLabel('이름', required: true),
@@ -1351,8 +1426,8 @@ class _TeacherEditDialogState extends State<_TeacherEditDialog> {
                           ]),
                           const SizedBox(height: 6),
                           const Text(
-                            '체크 시 해당 교사가 다음 로그인할 때 비밀번호 변경이 강제됩니다.\n'
-                            '※ 실제 임시 비밀번호 발급은 8단계 Cloud Functions 연동 후 완성됩니다.',
+                            '체크 후 저장하면 Cloud Functions가 임시 비밀번호를 자동 생성합니다.\n'
+                            '생성된 임시 비밀번호를 교사에게 직접 전달하세요.',
                             style: TextStyle(
                                 fontSize: 12,
                                 color: Color(0xFF795548),
@@ -1363,16 +1438,56 @@ class _TeacherEditDialogState extends State<_TeacherEditDialog> {
                             label: '비밀번호 초기화 체크박스입니다.',
                             child: CheckboxListTile(
                               value: _resetPassword,
-                              onChanged: (v) =>
-                                  setState(() => _resetPassword = v ?? false),
+                              onChanged: _saving
+                                  ? null
+                                  : (v) =>
+                                      setState(() => _resetPassword = v ?? false),
                               title: const Text(
-                                  '다음 로그인 시 비밀번호 변경 강제 (is_temp_password: true)',
+                                  '임시 비밀번호 발급 (Cloud Functions 자동 생성)',
                                   style: TextStyle(fontSize: 13)),
                               controlAffinity: ListTileControlAffinity.leading,
                               contentPadding: EdgeInsets.zero,
                               activeColor: Colors.orange,
                             ),
                           ),
+                          // 생성된 임시 비밀번호 표시
+                          if (_tempPwPlain != null) ...[
+                            const SizedBox(height: 10),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 10),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFFFF3E0),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: Colors.orange.shade400),
+                              ),
+                              child: Row(children: [
+                                const Icon(Icons.vpn_key_rounded,
+                                    color: Colors.orange, size: 16),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: SelectableText(
+                                    '임시 비밀번호: $_tempPwPlain',
+                                    style: const TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w700,
+                                        color: Color(0xFF5D4037)),
+                                  ),
+                                ),
+                              ]),
+                            ),
+                            Semantics(
+                              label: '임시 비밀번호 안내입니다. 교사에게 직접 전달하세요.',
+                              child: const Padding(
+                                padding: EdgeInsets.only(top: 4),
+                                child: Text(
+                                  '위 비밀번호를 교사에게 직접 전달하세요. 교사 재로그인 시 변경됩니다.',
+                                  style: TextStyle(
+                                      fontSize: 11, color: Color(0xFF9E9E9E)),
+                                ),
+                              ),
+                            ),
+                          ],
                         ],
                       ),
                     ),
@@ -1793,7 +1908,7 @@ class _TransferDialogState extends State<_TransferDialog> {
                   const SizedBox(height: 10),
                   const Center(
                     child: Text(
-                      '※ 강좌 이관 후 해당 교사 계정은 즉시 비활성화됩니다.\n(Auth 계정 비활성화는 8단계 완료 후 자동 적용)',
+                      '※ 강좌 이관 후 해당 교사 계정은 Firebase Auth에서 즉시 비활성화됩니다.',
                       textAlign: TextAlign.center,
                       style: TextStyle(fontSize: 11, color: Color(0xFF9E9E9E)),
                     ),

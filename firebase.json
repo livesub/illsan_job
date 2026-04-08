@@ -1,1 +1,32 @@
-{"flutter":{"platforms":{"android":{"default":{"projectId":"illsan-job","appId":"1:102533466026:android:3f968ef0eff2aee9f18dd3","fileOutput":"android/app/google-services.json"}},"dart":{"lib/firebase_options.dart":{"projectId":"illsan-job","configurations":{"android":"1:102533466026:android:3f968ef0eff2aee9f18dd3","ios":"1:102533466026:ios:4e3c3c5f51c94fdbf18dd3","macos":"1:102533466026:ios:4e3c3c5f51c94fdbf18dd3","web":"1:102533466026:web:949ff38a092df97ef18dd3","windows":"1:102533466026:web:cabe72eb9db5c8bef18dd3"}}}}}}
+{
+  "functions": [
+    {
+      "source": "functions",
+      "codebase": "default",
+      "ignore": ["node_modules", ".git", "firebase-debug.log"]
+    }
+  ],
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "illsan-job",
+          "appId": "1:102533466026:android:3f968ef0eff2aee9f18dd3",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "illsan-job",
+          "configurations": {
+            "android": "1:102533466026:android:3f968ef0eff2aee9f18dd3",
+            "ios": "1:102533466026:ios:4e3c3c5f51c94fdbf18dd3",
+            "macos": "1:102533466026:ios:4e3c3c5f51c94fdbf18dd3",
+            "web": "1:102533466026:web:949ff38a092df97ef18dd3",
+            "windows": "1:102533466026:web:cabe72eb9db5c8bef18dd3"
+          }
+        }
+      }
+    }
+  }
+}

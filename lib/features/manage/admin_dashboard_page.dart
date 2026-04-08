@@ -77,8 +77,8 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
         case 0: return const HomeTab();
         case 1: return const MemberTab();
         case 2: return const CourseTab();
-        case 3: return const NoticeTab();
-        case 4: return const JobTab();
+        case 3: return NoticeTab(userRole: widget.userRole, userName: widget.userName);
+        case 4: return JobTab(userRole: widget.userRole, userName: widget.userName);
         default: return const HomeTab();
       }
     } else {
@@ -86,8 +86,8 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
       switch (_selectedIndex) {
         case 0: return const HomeTab();
         case 1: return const MemberTab();
-        case 2: return const NoticeTab();
-        case 3: return const JobTab();
+        case 2: return NoticeTab(userRole: widget.userRole, userName: widget.userName);
+        case 3: return JobTab(userRole: widget.userRole, userName: widget.userName);
         default: return const HomeTab();
       }
     }

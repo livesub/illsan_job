@@ -21,7 +21,13 @@ class FsCol {
   static const String notices = 'notices';
 
   // 구직 게시물 컬렉션
-  static const String jobs    = 'jobs';
+  static const String jobs             = 'jobs';
+
+  // 구직 신청 컬렉션 (학생 → 교사 신청 내역)
+  static const String jobApplications  = 'job_applications';
+
+  // 계정 삭제 요청 컬렉션 (교사 → Cloud Function 트리거용)
+  static const String deleteRequests   = 'delete_requests';
 }
 
 // ─────────────────────────────────────────────────────────
@@ -56,6 +62,16 @@ class FsUser {
   static const String photoUrl      = 'photo_url';
   static const String isTempPw      = 'is_temp_password';
   static const String createdAt     = 'created_at';
+  // Cloud Functions에서 is_temp_password: true 시 자동 생성 (관리자 전달용)
+  static const String tempPwPlain   = 'temp_pw_plain';
+  static const String tempPwAt      = 'temp_pw_at';
+  // 가입 경로: 'email' | 'google' | 'kakao' 등 (미설정 시 email로 간주)
+  static const String loginType     = 'login_type';
+
+  // ── loginType 값 상수 ────────────────────────────────────
+  static const String loginTypeEmail  = 'email';   // 이메일 직접 가입
+  static const String loginTypeGoogle = 'google';  // 구글 연동 가입
+  static const String loginTypeKakao  = 'kakao';   // 카카오 연동 가입
 
   // ── role 상태값 상수 ─────────────────────────────────────
   // Firestore에 저장되는 문자열 값입니다. UserRole Enum과 반드시 일치해야 합니다.
@@ -167,6 +183,40 @@ class FsJob {
   static const String attachments = 'attachments';
   static const String createdAt   = 'created_at';
   static const String isDeleted   = 'is_deleted';
+}
+
+// ─────────────────────────────────────────────────────────
+// job_applications/{id} 문서 필드 상수
+//
+// 문서 구조:
+//   job_id          : String    — 구직 공고 ID (jobs/{id} 참조)
+//   job_title       : String    — 공고 제목 (비정규화)
+//   author_id       : String    — 공고 등록 교사 uid
+//   applicant_id    : String    — 신청 학생 uid
+//   applicant_name  : String    — 학생 이름 (비정규화)
+//   applicant_email : String    — 학생 이메일 (비정규화)
+//   course_id       : String    — 학생 소속 강좌 ID (비정규화)
+//   course_name     : String    — 학생 소속 강좌명 (비정규화)
+//   status          : String    — 'pending' | 'approved' | 'cancelled'
+//   applied_at      : Timestamp — 신청 시각
+// ─────────────────────────────────────────────────────────
+class FsJobApp {
+  FsJobApp._();
+
+  static const String jobId          = 'job_id';
+  static const String jobTitle       = 'job_title';
+  static const String authorId       = 'author_id';
+  static const String applicantId    = 'applicant_id';
+  static const String applicantName  = 'applicant_name';
+  static const String applicantEmail = 'applicant_email';
+  static const String courseId       = 'course_id';
+  static const String courseName     = 'course_name';
+  static const String status         = 'status';
+  static const String appliedAt      = 'applied_at';
+
+  static const String statusPending   = 'pending';
+  static const String statusApproved  = 'approved';
+  static const String statusCancelled = 'cancelled';
 }
 
 // ─────────────────────────────────────────────────────────

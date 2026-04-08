@@ -14,10 +14,12 @@
 //   - 페이징은 필터링된 결과에서 클라이언트로 처리
 //   → Firestore 복합 인덱스 생성 부담 없이 관리자 도구에 적합
 //
-// 7단계에서 강좌 내용 영역이 스마트 에디터로 교체됩니다.
+// [7단계 완료] 강좌 내용 영역: 서식 툴바(B/I/U) + 인라인 이미지 업로드 스마트 에디터
 
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:image_picker/image_picker.dart';
 import '../../../core/utils/firestore_keys.dart';
 
 // ─────────────────────────────────────────────────────────
@@ -754,6 +756,12 @@ class _CourseFormDialogState extends State<_CourseFormDialog> {
   bool _loadingTeachers = true;
   bool _saving = false;
 
+  // 인라인 이미지 Storage 경로 목록 (Hard Delete 기준)
+  final List<String> _inlineImgPaths = [];
+  // 인라인 이미지 다운로드 URL 목록 (화면 표시용)
+  final List<String> _inlineImgUrls  = [];
+  bool _uploadingImg = false;
+
   // 수정 모드 여부를 나타냅니다.
   bool get _isEdit => widget.editDoc != null;
 
@@ -763,8 +771,10 @@ class _CourseFormDialogState extends State<_CourseFormDialog> {
   void initState() {
     super.initState();
     _loadActiveTeachers();
-    // 수정 모드일 경우 기존 데이터를 폼에 채웁니다.
-    if (_isEdit) _prefillForm();
+    if (_isEdit) {
+      _prefillForm();
+      _loadInlineImages();
+    }
   }
 
   @override
@@ -783,6 +793,85 @@ class _CourseFormDialogState extends State<_CourseFormDialog> {
     _selectedTeacherName = data[FsCourse.teacherName] as String?;
     final ts = data[FsCourse.endDate] as Timestamp?;
     _endDate = ts?.toDate();
+  }
+
+  // 수정 모드: 기존 인라인 이미지의 다운로드 URL을 Storage에서 로드합니다.
+  Future<void> _loadInlineImages() async {
+    final data = widget.editDoc!.data() as Map<String, dynamic>;
+    final paths = (data[FsCourse.inlineImgs] as List?)?.cast<String>() ?? [];
+    for (final path in paths) {
+      try {
+        final url = await FirebaseStorage.instance.ref(path).getDownloadURL();
+        if (!mounted) return;
+        setState(() {
+          _inlineImgPaths.add(path);
+          _inlineImgUrls.add(url);
+        });
+      } catch (_) {}
+    }
+  }
+
+  // 이미지를 선택하고 Storage에 업로드한 뒤 목록에 추가합니다.
+  Future<void> _pickAndUploadImage() async {
+    final picker = ImagePicker();
+    final picked = await picker.pickImage(
+      source: ImageSource.gallery,
+      maxWidth: 1024,
+      maxHeight: 1024,
+      imageQuality: 80,
+    );
+    if (picked == null || !mounted) return;
+    setState(() => _uploadingImg = true);
+    try {
+      final bytes = await picked.readAsBytes();
+      final now = DateTime.now();
+      final path =
+          '${StoragePath.inlinePath(StoragePath.boardCourse, now.year, now.month)}'
+          '${now.millisecondsSinceEpoch}_${picked.name}';
+      final ref = FirebaseStorage.instance.ref(path);
+      await ref.putData(bytes, SettableMetadata(contentType: 'image/jpeg'));
+      final url = await ref.getDownloadURL();
+      if (!mounted) return;
+      setState(() {
+        _inlineImgPaths.add(path);
+        _inlineImgUrls.add(url);
+      });
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('이미지 업로드 실패: $e'), backgroundColor: Colors.red),
+      );
+    } finally {
+      if (mounted) setState(() => _uploadingImg = false);
+    }
+  }
+
+  // 인라인 이미지를 Storage에서 Hard Delete하고 목록에서 제거합니다.
+  Future<void> _removeImage(int index) async {
+    final path = _inlineImgPaths[index];
+    try {
+      await FirebaseStorage.instance.ref(path).delete();
+    } catch (_) {}
+    if (!mounted) return;
+    setState(() {
+      _inlineImgPaths.removeAt(index);
+      _inlineImgUrls.removeAt(index);
+    });
+  }
+
+  // 선택된 텍스트를 HTML 태그로 감쌉니다. (Bold/Italic/Underline)
+  void _wrapSelection(String open, String close) {
+    final sel = _contentCtrl.selection;
+    if (!sel.isValid) return;
+    final text = _contentCtrl.text;
+    final before   = text.substring(0, sel.start);
+    final selected = text.substring(sel.start, sel.end);
+    final after    = text.substring(sel.end);
+    _contentCtrl.value = TextEditingValue(
+      text: '$before$open$selected$close$after',
+      selection: TextSelection.collapsed(
+          offset: sel.start + open.length + selected.length + close.length),
+    );
   }
 
   // 활성 교사 목록을 Firestore에서 가져옵니다.
@@ -854,6 +943,7 @@ class _CourseFormDialogState extends State<_CourseFormDialog> {
       FsCourse.teacherName: _selectedTeacherName,
       FsCourse.content:     _contentCtrl.text.trim(),
       FsCourse.endDate:     Timestamp.fromDate(_endDate!),
+      FsCourse.inlineImgs:  _inlineImgPaths,
     };
 
     try {
@@ -868,7 +958,6 @@ class _CourseFormDialogState extends State<_CourseFormDialog> {
         await FirebaseFirestore.instance.collection(FsCol.courses).add({
           ...payload,
           FsCourse.status:      FsCourse.statusActive,
-          FsCourse.inlineImgs:  [],
           FsCourse.attachments: [],
           FsCourse.createdAt:   StoragePath.nowCreatedAt(),
         });
@@ -975,23 +1064,10 @@ class _CourseFormDialogState extends State<_CourseFormDialog> {
                       _buildEndDateField(),
                       const SizedBox(height: 20),
 
-                      // 4. 강좌 내용 (7단계에서 스마트 에디터로 교체 예정)
+                      // 4. 강좌 내용 — 스마트 에디터 (7단계)
                       _buildLabel('강좌 내용', required: true),
-                      const SizedBox(height: 4),
-                      const Text(
-                        '※ 7단계 업데이트 후 이미지 첨부 기능이 추가됩니다.',
-                        style: TextStyle(fontSize: 11, color: Color(0xFF9E9E9E)),
-                      ),
                       const SizedBox(height: 6),
-                      Semantics(
-                        label: '강좌 내용 입력란입니다. 필수 항목입니다.',
-                        child: TextFormField(
-                          controller: _contentCtrl,
-                          maxLines: 6,
-                          decoration: _inputDeco('강좌 소개, 커리큘럼 등을 자유롭게 입력하세요.'),
-                          validator: (v) => (v == null || v.trim().isEmpty) ? '강좌 내용을 입력해 주세요.' : null,
-                        ),
-                      ),
+                      _buildSmartEditor(),
                       const SizedBox(height: 28),
 
                       // 저장 버튼
@@ -1124,6 +1200,172 @@ class _CourseFormDialogState extends State<_CourseFormDialog> {
           ),
         ),
       ),
+    );
+  }
+
+  // 서식 툴바 + 내용 입력 + 인라인 이미지 섹션
+  Widget _buildSmartEditor() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // 서식 툴바
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF5F5F5),
+            border: Border.all(color: const Color(0xFFE0E0E0)),
+            borderRadius: const BorderRadius.only(
+              topLeft: Radius.circular(10),
+              topRight: Radius.circular(10),
+            ),
+          ),
+          child: Row(children: [
+            Semantics(
+              label: '굵게 서식 버튼입니다.',
+              child: IconButton(
+                icon: const Icon(Icons.format_bold_rounded, size: 20),
+                onPressed: () => _wrapSelection('<b>', '</b>'),
+                tooltip: '굵게',
+                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                padding: EdgeInsets.zero,
+              ),
+            ),
+            Semantics(
+              label: '기울임 서식 버튼입니다.',
+              child: IconButton(
+                icon: const Icon(Icons.format_italic_rounded, size: 20),
+                onPressed: () => _wrapSelection('<i>', '</i>'),
+                tooltip: '기울임',
+                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                padding: EdgeInsets.zero,
+              ),
+            ),
+            Semantics(
+              label: '밑줄 서식 버튼입니다.',
+              child: IconButton(
+                icon: const Icon(Icons.format_underline_rounded, size: 20),
+                onPressed: () => _wrapSelection('<u>', '</u>'),
+                tooltip: '밑줄',
+                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                padding: EdgeInsets.zero,
+              ),
+            ),
+            const VerticalDivider(width: 16, thickness: 1, color: Color(0xFFE0E0E0)),
+            Semantics(
+              label: '이미지 추가 버튼입니다.',
+              child: _uploadingImg
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2))
+                  : IconButton(
+                      icon: const Icon(Icons.image_rounded,
+                          size: 20, color: _blue),
+                      onPressed: _pickAndUploadImage,
+                      tooltip: '이미지 추가',
+                      constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                      padding: EdgeInsets.zero,
+                    ),
+            ),
+          ]),
+        ),
+        // 내용 입력 영역
+        Semantics(
+          label: '강좌 내용 입력란입니다. 필수 항목입니다.',
+          child: TextFormField(
+            controller: _contentCtrl,
+            maxLines: 8,
+            decoration: InputDecoration(
+              hintText: '강좌 소개, 커리큘럼 등을 자유롭게 입력하세요.\n서식 버튼으로 굵게·기울임·밑줄을 적용할 수 있습니다.',
+              hintStyle: const TextStyle(color: Color(0xFFBDBDBD), fontSize: 13),
+              filled: true,
+              fillColor: Colors.white,
+              border: const OutlineInputBorder(
+                borderRadius: BorderRadius.only(
+                    bottomLeft: Radius.circular(10),
+                    bottomRight: Radius.circular(10)),
+                borderSide: BorderSide(color: Color(0xFFE0E0E0)),
+              ),
+              enabledBorder: const OutlineInputBorder(
+                borderRadius: BorderRadius.only(
+                    bottomLeft: Radius.circular(10),
+                    bottomRight: Radius.circular(10)),
+                borderSide: BorderSide(color: Color(0xFFE0E0E0)),
+              ),
+              focusedBorder: const OutlineInputBorder(
+                borderRadius: BorderRadius.only(
+                    bottomLeft: Radius.circular(10),
+                    bottomRight: Radius.circular(10)),
+                borderSide: BorderSide(color: _blue, width: 2),
+              ),
+              errorBorder: const OutlineInputBorder(
+                borderRadius: BorderRadius.only(
+                    bottomLeft: Radius.circular(10),
+                    bottomRight: Radius.circular(10)),
+                borderSide: BorderSide(color: Colors.red),
+              ),
+              contentPadding: const EdgeInsets.all(14),
+            ),
+            validator: (v) =>
+                (v == null || v.trim().isEmpty) ? '강좌 내용을 입력해 주세요.' : null,
+          ),
+        ),
+        // 업로드된 인라인 이미지 목록
+        if (_inlineImgPaths.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          const Text('첨부 이미지',
+              style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF424242))),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: List.generate(_inlineImgPaths.length, (i) {
+              return Stack(children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Image.network(
+                    _inlineImgUrls[i],
+                    width: 80,
+                    height: 80,
+                    fit: BoxFit.cover,
+                    loadingBuilder: (_, child, progress) => progress == null
+                        ? child
+                        : const SizedBox(
+                            width: 80,
+                            height: 80,
+                            child: Center(
+                                child: CircularProgressIndicator(strokeWidth: 2))),
+                    errorBuilder: (_, __, ___) => const SizedBox(
+                        width: 80,
+                        height: 80,
+                        child: Icon(Icons.broken_image_rounded, color: Colors.grey)),
+                  ),
+                ),
+                Positioned(
+                  top: 2,
+                  right: 2,
+                  child: Semantics(
+                    label: '이미지 삭제 버튼입니다.',
+                    child: GestureDetector(
+                      onTap: () => _removeImage(i),
+                      child: Container(
+                        decoration: const BoxDecoration(
+                            color: Colors.red, shape: BoxShape.circle),
+                        padding: const EdgeInsets.all(2),
+                        child: const Icon(Icons.close_rounded,
+                            size: 14, color: Colors.white),
+                      ),
+                    ),
+                  ),
+                ),
+              ]);
+            }),
+          ),
+        ],
+      ],
     );
   }
 
