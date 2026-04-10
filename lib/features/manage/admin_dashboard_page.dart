@@ -94,17 +94,14 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
   // 역할에 따라 보이는 메뉴가 달라집니다. (INSTRUCTOR는 강좌관리 숨김)
   List<_MenuItem> get _menuItems {
     return [
-      // 모든 역할 공통 — 대시보드 홈
       _MenuItem(icon: Icons.dashboard_rounded, label: '관리 대시보드'),
-      // 모든 역할 공통 — 회원 관리
       _MenuItem(icon: Icons.people_alt_rounded, label: '회원 관리'),
-      // SUPER_ADMIN 전용 — 강좌 개설/관리
       if (widget.userRole == UserRole.SUPER_ADMIN)
         _MenuItem(icon: Icons.school_rounded, label: '강좌 관리'),
-      // 모든 역할 공통 — 공지사항
       _MenuItem(icon: Icons.campaign_rounded, label: '공지사항 관리'),
-      // 모든 역할 공통 — 구직 등록
-      _MenuItem(icon: Icons.work_rounded, label: '구직 등록 관리'),
+      // INSTRUCTOR 전용 — 구직 등록
+      if (widget.userRole == UserRole.INSTRUCTOR)
+        _MenuItem(icon: Icons.work_rounded, label: '구직 등록 관리'),
     ];
   }
 
@@ -112,20 +109,19 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
   Widget _buildContent() {
     // SUPER_ADMIN과 INSTRUCTOR의 메뉴 인덱스 매핑이 다르므로 분기합니다.
     if (widget.userRole == UserRole.SUPER_ADMIN) {
-      // SUPER_ADMIN: 홈(0), 회원(1), 강좌(2), 공지(3), 구직(4)
+      // SUPER_ADMIN: 홈(0), 회원(1), 강좌(2), 공지(3)
       switch (_selectedIndex) {
         case 0: return const HomeTab();
-        case 1: return const MemberTab();
+        case 1: return MemberTab(userRole: widget.userRole);
         case 2: return const CourseTab();
         case 3: return NoticeTab(userRole: widget.userRole, userName: widget.userName);
-        case 4: return JobTab(userRole: widget.userRole, userName: widget.userName);
         default: return const HomeTab();
       }
     } else {
       // INSTRUCTOR: 홈(0), 회원(1), 공지(2), 구직(3)
       switch (_selectedIndex) {
         case 0: return const InstructorHomeTab();
-        case 1: return const MemberTab();
+        case 1: return MemberTab(userRole: widget.userRole);
         case 2: return NoticeTab(userRole: widget.userRole, userName: widget.userName);
         case 3: return JobTab(userRole: widget.userRole, userName: widget.userName);
         default: return const HomeTab();
