@@ -43,6 +43,10 @@ dependencies:
   firebase_storage: ^13.2.0
   # 이미지 선택 — 교사 프로필 사진 업로드 (web/mobile 공통)
   image_picker: ^1.1.2
+  # 파일 선택 — 구직/공지 첨부파일 업로드 (web/mobile 공통)
+  file_picker: ^8.1.7
+  # XFile 공통 타입 — 웹/모바일 파일 크기 체크 (dart:io 대체)
+  cross_file: ^0.3.4+2
 
 dev_dependencies:
   flutter_test:

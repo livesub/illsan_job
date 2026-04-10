@@ -8,12 +8,18 @@
 // Firestore: users/{uid} 의 role 필드로 메뉴 항목을 분기합니다.
 
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../core/enums/user_role.dart';
+import '../../core/utils/firestore_keys.dart';
+import '../instructor/instructor_profile_page.dart';
 import 'tabs/home_tab.dart';
+import 'tabs/instructor_home_tab.dart';
 import 'tabs/member_tab.dart';
 import 'tabs/course_tab.dart';
 import 'tabs/notice_tab.dart';
 import 'tabs/job_tab.dart';
+import '../login/login_intro_page.dart';
 
 // 관리자 대시보드 페이지 — 사이드바 + 콘텐츠 영역을 포함합니다.
 // 화면 상태(현재 선택된 메뉴)가 바뀌므로 StatefulWidget으로 구현합니다.
@@ -50,6 +56,40 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
   // 현재 선택된 메뉴 인덱스 (0 = 홈 대시보드)
   int _selectedIndex = 0;
 
+  // INSTRUCTOR 프로필 사진 URL
+  String _instructorPhotoUrl = '';
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.userRole == UserRole.INSTRUCTOR) _loadInstructorPhoto();
+  }
+
+  // INSTRUCTOR 프로필 사진 Firestore 로드
+  Future<void> _loadInstructorPhoto() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    final doc = await FirebaseFirestore.instance
+        .collection(FsCol.users)
+        .doc(uid)
+        .get();
+    if (!mounted) return;
+    setState(() {
+      _instructorPhotoUrl =
+          (doc.data()?[FsUser.photoUrl] as String?) ?? '';
+    });
+  }
+
+  void _goToProfile(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const InstructorProfilePage()),
+    ).then((_) {
+      // 마이페이지에서 사진 변경 후 돌아오면 갱신
+      if (widget.userRole == UserRole.INSTRUCTOR) _loadInstructorPhoto();
+    });
+  }
+
   // ── 메뉴 항목 정의 ────────────────────────────────────────
   // 역할에 따라 보이는 메뉴가 달라집니다. (INSTRUCTOR는 강좌관리 숨김)
   List<_MenuItem> get _menuItems {
@@ -84,7 +124,7 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
     } else {
       // INSTRUCTOR: 홈(0), 회원(1), 공지(2), 구직(3)
       switch (_selectedIndex) {
-        case 0: return const HomeTab();
+        case 0: return const InstructorHomeTab();
         case 1: return const MemberTab();
         case 2: return NoticeTab(userRole: widget.userRole, userName: widget.userName);
         case 3: return JobTab(userRole: widget.userRole, userName: widget.userName);
@@ -116,7 +156,7 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
     );
   }
 
-  // 모바일용 AppBar — 햄버거 메뉴 + 타이틀
+  // 모바일용 AppBar — 햄버거 메뉴 + 타이틀 + INSTRUCTOR 아바타
   AppBar _buildMobileAppBar() {
     return AppBar(
       backgroundColor: _sidebarBg,
@@ -126,6 +166,21 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
         style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
       ),
       elevation: 0,
+      actions: widget.userRole == UserRole.INSTRUCTOR
+          ? [
+              Semantics(
+                label: '내 프로필 보기 버튼',
+                button: true,
+                child: GestureDetector(
+                  onTap: () => _goToProfile(context),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: _buildAvatar(radius: 18),
+                  ),
+                ),
+              ),
+            ]
+          : null,
     );
   }
 
@@ -182,36 +237,9 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               child: Semantics(
                 label: '현재 로그인 사용자: ${widget.userName}, 역할: ${_roleLabel()}',
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // 역할 배지
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.2),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Text(
-                        _roleLabel(),
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      widget.userName,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ],
-                ),
+                child: widget.userRole == UserRole.INSTRUCTOR
+                    ? _buildInstructorUserInfo()
+                    : _buildDefaultUserInfo(),
               ),
             ),
 
@@ -243,9 +271,14 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
               child: ListTile(
                 leading: const Icon(Icons.logout_rounded, color: Colors.white70, size: 22),
                 title: const Text('로그아웃', style: TextStyle(color: Colors.white70, fontSize: 14)),
-                onTap: () {
-                  // TODO: Firebase Auth 로그아웃 처리
-                  // FirebaseAuth.instance.signOut();
+                onTap: () async {
+                  await FirebaseAuth.instance.signOut();
+                  if (!context.mounted) return;
+                  Navigator.of(context).pushAndRemoveUntil(
+                    MaterialPageRoute(
+                        builder: (_) => const LoginIntroPage()),
+                    (_) => false,
+                  );
                 },
               ),
             ),
@@ -253,6 +286,90 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
           ],
         ),
       ),
+    );
+  }
+
+  // INSTRUCTOR 사이드바 사용자 정보 (아바타 + 역할 + 이름, 클릭 시 마이페이지)
+  Widget _buildInstructorUserInfo() {
+    return GestureDetector(
+      onTap: () => _goToProfile(context),
+      child: Row(
+        children: [
+          _buildAvatar(radius: 22),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Text(
+                    '교사',
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  widget.userName,
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // SUPER_ADMIN 사이드바 사용자 정보 (기존 레이아웃)
+  Widget _buildDefaultUserInfo() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.2),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Text(
+            _roleLabel(),
+            style: const TextStyle(
+                color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600),
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          widget.userName,
+          style: const TextStyle(
+              color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700),
+        ),
+      ],
+    );
+  }
+
+  // 프로필 CircleAvatar — DB 사진 있으면 NetworkImage, 없으면 기본 아이콘
+  Widget _buildAvatar({required double radius}) {
+    return CircleAvatar(
+      radius: radius,
+      backgroundColor: Colors.white.withValues(alpha: 0.25),
+      backgroundImage: _instructorPhotoUrl.isNotEmpty
+          ? NetworkImage(_instructorPhotoUrl)
+          : null,
+      child: _instructorPhotoUrl.isEmpty
+          ? Icon(Icons.person_rounded, color: Colors.white, size: radius)
+          : null,
     );
   }
 

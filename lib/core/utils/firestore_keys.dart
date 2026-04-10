@@ -28,6 +28,9 @@ class FsCol {
 
   // 계정 삭제 요청 컬렉션 (교사 → Cloud Function 트리거용)
   static const String deleteRequests   = 'delete_requests';
+
+  // 구직 공고 댓글/대댓글 컬렉션
+  static const String jobComments      = 'job_comments';
 }
 
 // ─────────────────────────────────────────────────────────
@@ -62,6 +65,7 @@ class FsUser {
   static const String photoUrl      = 'photo_url';
   static const String isTempPw      = 'is_temp_password';
   static const String createdAt     = 'created_at';
+  static const String fcmToken      = 'fcm_token';  // FCM 푸시 토큰 (앱 실행 시 갱신)
   // Cloud Functions에서 is_temp_password: true 시 자동 생성 (관리자 전달용)
   static const String tempPwPlain   = 'temp_pw_plain';
   static const String tempPwAt      = 'temp_pw_at';
@@ -153,8 +157,11 @@ class FsNotice {
   static const String isDeleted   = 'is_deleted';
 
   // ── target 상태값 상수 ───────────────────────────────────
-  static const String targetAll    = 'all';    // 전체 공지
-  static const String targetCourse = 'course'; // 특정 강좌 공지
+  static const String targetAll      = 'all';        // 전체(교사+학생) 공지
+  static const String targetTeachers = 'teachers';   // 전체 교사 대상
+  static const String targetStudents = 'students';   // 전체 학생 대상
+  static const String targetCourse   = 'course';     // 특정 반 공지
+  static const String targetCourseAll = 'course_all'; // 교사 담당 반 전체 공지
 }
 
 // ─────────────────────────────────────────────────────────
@@ -175,14 +182,22 @@ class FsJob {
   FsJob._();
 
   // ── 필드명 상수 ──────────────────────────────────────────
-  static const String title       = 'title';
-  static const String content     = 'content';
-  static const String authorId    = 'author_id';
-  static const String authorName  = 'author_name';
-  static const String inlineImgs  = 'inline_imgs';
-  static const String attachments = 'attachments';
-  static const String createdAt   = 'created_at';
-  static const String isDeleted   = 'is_deleted';
+  static const String title            = 'title';
+  static const String content          = 'content';
+  static const String authorId         = 'author_id';
+  static const String authorName       = 'author_name';
+  static const String inlineImgs       = 'inline_imgs';
+  static const String attachments      = 'attachments';
+  static const String createdAt        = 'created_at';
+  static const String isDeleted        = 'is_deleted';
+  // 기간 — 교사가 입력한 자유 텍스트 (예: "채용 시 마감")
+  static const String period           = 'period';
+  // 등록 시각 Timestamp — 고도화 대비 hidden 필드
+  static const String createdTimestamp = 'created_timestamp';
+  // 노출 대상 반 — ['all'] 또는 강좌 ID 목록
+  static const String targetCourses    = 'target_courses';
+
+  static const String targetAll = 'all';
 }
 
 // ─────────────────────────────────────────────────────────
@@ -236,6 +251,34 @@ class FsJobApp {
 //   StoragePath.inlinePath('course', 2026, 4)
 //   → 'uploads/course/2026/04/inline/'
 // ─────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────
+// job_comments/{id} 문서 필드 상수
+//
+// 문서 구조:
+//   job_id      : String  — 소속 공고 ID
+//   content     : String  — 댓글 본문 (삭제 시 텍스트 교체)
+//   author_id   : String  — 작성자 uid
+//   author_name : String  — 작성자 이름 (비정규화)
+//   parent_id   : String? — 대댓글 시 부모 댓글 ID (null = 최상위)
+//   is_deleted  : bool    — Soft Delete 여부 (true = 삭제 처리됨)
+//   created_at  : String  — yymmddHis 포맷
+// ─────────────────────────────────────────────────────────
+class FsJobComment {
+  FsJobComment._();
+
+  static const String jobId      = 'job_id';
+  static const String content    = 'content';
+  static const String authorId   = 'author_id';
+  static const String authorName = 'author_name';
+  static const String parentId   = 'parent_id';
+  static const String isDeleted  = 'is_deleted';
+  static const String createdAt  = 'created_at';
+
+  // Soft Delete 시 content 필드를 이 값으로 교체
+  static const String deletedByRule = '규정에 의해 삭제된 댓글입니다';
+  static const String deletedBySelf = '삭제된 글입니다';
+}
+
 class StoragePath {
   StoragePath._();
 

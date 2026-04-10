@@ -68,7 +68,17 @@ class _InstructorHomeTabState extends State<InstructorHomeTab> {
             .where(FsUser.courseId, whereIn: courseIds.take(30).toList())
             .orderBy(FsUser.createdAt, descending: true)
             .get();
-        _pendingStudents = pendingSnap.docs;
+        // 오늘 가입 신청 건만 필터 (created_at: yymmddHis 포맷 prefix 비교)
+        final now = DateTime.now();
+        final todayPrefix =
+            '${now.year.toString().substring(2)}'
+            '${now.month.toString().padLeft(2, '0')}'
+            '${now.day.toString().padLeft(2, '0')}';
+        _pendingStudents = pendingSnap.docs.where((doc) {
+          final data = doc.data() as Map<String, dynamic>;
+          final ca = data[FsUser.createdAt] as String? ?? '';
+          return ca.startsWith(todayPrefix);
+        }).toList();
 
         // 강좌별 승인된 학생 수 계산
         final counts = <String, int>{};
@@ -169,7 +179,7 @@ class _InstructorHomeTabState extends State<InstructorHomeTab> {
   // ── 가입 승인 대기 섹션 ────────────────────────────────
   Widget _buildPendingStudentsSection() {
     return _SectionCard(
-      title: '가입 승인 대기 (${_pendingStudents.length}건)',
+      title: '오늘 가입 승인 대기 (${_pendingStudents.length}건)',
       child: _pendingStudents.isEmpty
           ? _emptyText('승인 대기 중인 학생이 없습니다.')
           : Column(

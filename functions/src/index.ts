@@ -80,6 +80,128 @@ export const onStudentDeleteRequested = onDocumentCreated(
   }
 );
 
+// ── 공지사항 등록 시 FCM 푸시 알림 발송 ─────────────────────
+// notices/{noticeId} 문서 생성 트리거
+// 1. target 값에 따라 대상 FCM 토큰 조회
+// 2. 500개 배치로 sendEachForMulticast 발송
+// 3. created_at 서버 시간으로 덮어쓰기 (yymmddHis 포맷)
+export const onNoticeCreated = onDocumentCreated(
+  'notices/{noticeId}',
+  async (event) => {
+    const data = event.data?.data();
+    if (!data) return;
+
+    const target   = data['target']    as string | undefined;
+    const authorId = data['author_id'] as string | undefined;
+    const courseId = data['course_id'] as string | undefined;
+    const title    = (data['title']    as string | undefined) ?? '새 공지사항';
+    const rawBody  = (data['content']  as string | undefined) ?? '';
+    // HTML 태그 제거 후 최대 100자 미리보기
+    const body = rawBody.replace(/<[^>]+>/g, '').substring(0, 100);
+
+    // 서버 시간 created_at 덮어쓰기 (yymmddHis)
+    await event.data!.ref.update({ created_at: _formatCreatedAt(new Date()) });
+
+    if (!target || !authorId) return;
+
+    const tokens = await _getTargetTokens(target, authorId, courseId);
+    if (tokens.length === 0) {
+      console.log('FCM 발송 대상 토큰 없음');
+      return;
+    }
+
+    await _sendFcm(tokens, title, body);
+  }
+);
+
+// target 값별 대상 users에서 fcm_token 수집
+async function _getTargetTokens(
+  target: string,
+  authorId: string,
+  courseId?: string
+): Promise<string[]> {
+  const db = admin.firestore();
+
+  // course_all: 교사 담당 활성 강좌의 학생 전체
+  if (target === 'course_all') {
+    const courseSnap = await db.collection('courses')
+      .where('teacher_id', '==', authorId)
+      .where('status', '==', 'active')
+      .get();
+    const courseIds = courseSnap.docs.map(d => d.id);
+    if (courseIds.length === 0) return [];
+
+    const tokens: string[] = [];
+    // Firestore 'in' 쿼리 최대 30개 제한 → 배치 처리
+    for (let i = 0; i < courseIds.length; i += 30) {
+      const chunk = courseIds.slice(i, i + 30);
+      const snap  = await db.collection('users')
+        .where('course_id', 'in', chunk)
+        .where('status', '==', 'approved')
+        .get();
+      snap.docs.forEach(d => {
+        const t = d.data()['fcm_token'] as string | undefined;
+        if (t) tokens.push(t);
+      });
+    }
+    return tokens;
+  }
+
+  let query: admin.firestore.Query = db.collection('users')
+    .where('status', '==', 'approved');
+
+  switch (target) {
+    case 'all':
+      query = query.where('role', 'in', ['INSTRUCTOR', 'STUDENT']);
+      break;
+    case 'teachers':
+      query = query.where('role', '==', 'INSTRUCTOR');
+      break;
+    case 'students':
+      query = query.where('role', '==', 'STUDENT');
+      break;
+    case 'course':
+      if (!courseId) return [];
+      query = query.where('course_id', '==', courseId);
+      break;
+    default:
+      return [];
+  }
+
+  const snap = await query.get();
+  return snap.docs
+    .map(d => d.data()['fcm_token'] as string | undefined)
+    .filter((t): t is string => !!t);
+}
+
+// 500개 배치로 FCM 발송
+async function _sendFcm(tokens: string[], title: string, body: string): Promise<void> {
+  const BATCH = 500;
+  for (let i = 0; i < tokens.length; i += BATCH) {
+    const batch = tokens.slice(i, i + BATCH);
+    try {
+      const result = await admin.messaging().sendEachForMulticast({
+        tokens: batch,
+        notification: { title, body },
+      });
+      console.log(`FCM 발송 완료: 성공 ${result.successCount} / 실패 ${result.failureCount}`);
+    } catch (e) {
+      console.error('FCM 발송 오류:', e);
+    }
+  }
+}
+
+// yymmddHis 포맷: 260403113500
+function _formatCreatedAt(date: Date): string {
+  const yy = String(date.getFullYear()).slice(2);
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const dd = String(date.getDate()).padStart(2, '0');
+  const hh = String(date.getHours()).padStart(2, '0');
+  const ii = String(date.getMinutes()).padStart(2, '0');
+  const ss = String(date.getSeconds()).padStart(2, '0');
+  return `${yy}${mm}${dd}${hh}${ii}${ss}`;
+}
+
 // 8자 임시 비밀번호 생성: 대문자 1 + 특수문자 1 + 숫자 1 + 나머지 5자 혼합
 function generateTempPassword(): string {
   const upper   = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';

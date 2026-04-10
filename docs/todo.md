@@ -1,11 +1,7 @@
-# 교사 대시보드 구현 (docs_rules/3. AI 관리자페이지 회원관리(교사).docx)
+## 공지사항 기능 구현 (1단계)
 
-## 1단계 — 기반 + 교사 홈 대시보드 전체 (현재)
-- [ ] firestore_keys.dart: loginType, FsJobApp, FsCol.jobApplications/deleteRequests 추가
-- [ ] functions/src/index.ts: onStudentDeleteRequested 트리거 함수 추가
-- [ ] instructor_home_tab.dart 신규 생성 (담당 강좌 카드 + 승인 팝업 + 구직신청 관리)
-- [ ] admin_dashboard_page.dart: INSTRUCTOR 홈 탭 → InstructorHomeTab 교체 + 프로필 아바타
-
-## 2단계 — 교사 마이페이지 (다음)
-- [ ] instructor_my_page.dart 신규 생성 (프로필 수정, 이메일 read-only)
-- [ ] admin_dashboard_page.dart: 아바타 클릭 → 마이페이지 라우팅 연결
+- [ ] 1. firestore_keys.dart — FsNotice 타겟 상수 추가 (targetTeachers, targetStudents, targetCourseAll)
+- [ ] 2. notice_tab.dart — 목록 필터 로직 + 배지 표시 업데이트 (_applyFilterAndPage, _buildNoticeTile)
+- [ ] 3. notice_tab.dart — SUPER_ADMIN 3선택 / INSTRUCTOR 2선택 타겟 UI (_buildTargetSelector, initState)
+- [ ] 4. notice_tab.dart — 스마트 에디터 색상 버튼 추가 (_buildSmartEditor)
+- [ ] 5. FCM 토큰 관리 — firebase_messaging 패키지 필요, pubspec.yaml 수정 후 별도 진행

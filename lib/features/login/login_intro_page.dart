@@ -3,6 +3,7 @@
 // Image.asset 사용 금지 — 모든 UI 요소를 코드로 구성합니다.
 
 import 'package:flutter/material.dart';
+import 'login_page.dart';
 
 // 앱의 첫 화면입니다.
 // 상태 변경이 없으므로 StatelessWidget으로 구현합니다.
@@ -243,8 +244,10 @@ class LoginIntroPage extends StatelessWidget {
                 ),
               ),
               onPressed: () {
-                // TODO: 로그인 페이지로 이동
-                // Navigator.push(context, MaterialPageRoute(builder: (_) => const LoginPage()));
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const LoginPage()),
+                );
               },
               child: const Text(
                 '로그인',

@@ -12,6 +12,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:file_picker/file_picker.dart';
 import '../../../core/enums/user_role.dart';
 import '../../../core/utils/firestore_keys.dart';
 
@@ -77,11 +78,39 @@ class _NoticeTabState extends State<NoticeTab> {
     }
   }
 
+  // 타겟 값 → 배지 텍스트
+  static String _badgeLabel(String target) {
+    switch (target) {
+      case FsNotice.targetTeachers:  return '교사';
+      case FsNotice.targetStudents:  return '학생';
+      case FsNotice.targetCourse:    return '특정반';
+      case FsNotice.targetCourseAll: return '전체반';
+      default: return '전체';
+    }
+  }
+
+  // 타겟 값 → 배지 색상
+  static Color _badgeColor(String target) {
+    switch (target) {
+      case FsNotice.targetTeachers:  return const Color(0xFF00796B);
+      case FsNotice.targetStudents:  return const Color(0xFF388E3C);
+      case FsNotice.targetCourse:
+      case FsNotice.targetCourseAll: return const Color(0xFFF57C00);
+      default: return _blue;
+    }
+  }
+
   void _applyFilterAndPage() {
     final search = _searchCtrl.text.trim().toLowerCase();
     List<QueryDocumentSnapshot> filtered = _allNotices.where((doc) {
       final data = doc.data() as Map<String, dynamic>;
-      if (_typeFilter != null && data[FsNotice.target] != _typeFilter) return false;
+      if (_typeFilter != null) {
+        final t = data[FsNotice.target] as String? ?? '';
+        // '전체 공지' 필터: all / teachers / students 포함
+        final isGlobal = t == FsNotice.targetAll || t == FsNotice.targetTeachers || t == FsNotice.targetStudents;
+        if (_typeFilter == FsNotice.targetAll && !isGlobal) return false;
+        if (_typeFilter == FsNotice.targetCourse && isGlobal) return false;
+      }
       if (search.isNotEmpty) {
         final title = (data[FsNotice.title] as String? ?? '').toLowerCase();
         if (!title.contains(search)) return false;
@@ -184,9 +213,10 @@ class _NoticeTabState extends State<NoticeTab> {
     if (confirmed != true || !mounted) return;
 
     try {
-      // 인라인 이미지 Storage Hard Delete
-      final imgPaths = (data[FsNotice.inlineImgs] as List?)?.cast<String>() ?? [];
-      for (final path in imgPaths) {
+      // 인라인 이미지 + 첨부파일 Storage Hard Delete
+      final imgPaths    = (data[FsNotice.inlineImgs]  as List?)?.cast<String>() ?? [];
+      final attachPaths = (data[FsNotice.attachments] as List?)?.cast<String>() ?? [];
+      for (final path in [...imgPaths, ...attachPaths]) {
         try { await FirebaseStorage.instance.ref(path).delete(); } catch (_) {}
       }
       await FirebaseFirestore.instance
@@ -385,13 +415,14 @@ class _NoticeTabState extends State<NoticeTab> {
   }
 
   Widget _buildNoticeTile(QueryDocumentSnapshot doc) {
-    final data     = doc.data() as Map<String, dynamic>;
-    final title    = data[FsNotice.title]      as String? ?? '제목 없음';
-    final target   = data[FsNotice.target]     as String? ?? FsNotice.targetAll;
-    final author   = data[FsNotice.authorName] as String? ?? '';
-    final created  = data[FsNotice.createdAt]  as String? ?? '';
-    final isAll    = target == FsNotice.targetAll;
-    final canEdit  = _canEdit(doc);
+    final data       = doc.data() as Map<String, dynamic>;
+    final title      = data[FsNotice.title]      as String? ?? '제목 없음';
+    final target     = data[FsNotice.target]     as String? ?? FsNotice.targetAll;
+    final author     = data[FsNotice.authorName] as String? ?? '';
+    final created    = data[FsNotice.createdAt]  as String? ?? '';
+    final badgeLabel = _badgeLabel(target);
+    final badgeColor = _badgeColor(target);
+    final canEdit    = _canEdit(doc);
 
     // created_at: yymmddHis → 표시용 포맷 (26-04-05)
     String dateStr = created;
@@ -400,7 +431,7 @@ class _NoticeTabState extends State<NoticeTab> {
     }
 
     return Semantics(
-      label: '$title, ${isAll ? "전체 공지" : "반별 공지"}, 작성자: $author, 작성일: $dateStr',
+      label: '$title, $badgeLabel 공지, 작성자: $author, 작성일: $dateStr',
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         decoration: const BoxDecoration(
@@ -409,14 +440,13 @@ class _NoticeTabState extends State<NoticeTab> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             decoration: BoxDecoration(
-              color: (isAll ? _blue : const Color(0xFFF57C00))
-                  .withValues(alpha: 0.12),
+              color: badgeColor.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(8),
             ),
             child: Text(
-              isAll ? '전체' : '반별',
+              badgeLabel,
               style: TextStyle(
-                  color: isAll ? _blue : const Color(0xFFF57C00),
+                  color: badgeColor,
                   fontSize: 11,
                   fontWeight: FontWeight.w700),
             ),
@@ -532,7 +562,15 @@ class _NoticeFormDialogState extends State<_NoticeFormDialog> {
   final List<String> _imgUrls  = [];
   bool _uploadingImg = false;
 
-  static const Color _blue = Color(0xFF1565C0);
+  // 첨부파일 — 기존(수정 시) + 신규
+  final List<String> _existAttachPaths   = [];
+  final List<String> _existAttachNames   = [];
+  final List<XFile>  _newAttachFiles     = [];
+  final List<String> _removedAttachPaths = []; // 수정 시 삭제 예약
+
+  static const int   _maxAttach = 3;
+  static const int   _maxBytes  = 3 * 1024 * 1024; // 3MB
+  static const Color _blue      = Color(0xFF1565C0);
 
   @override
   void initState() {
@@ -541,10 +579,11 @@ class _NoticeFormDialogState extends State<_NoticeFormDialog> {
     if (_isEdit) {
       _prefillForm();
       _loadInlineImages();
+      _loadExistAttachments();
     }
-    // INSTRUCTOR는 반별 공지만 작성 가능합니다.
+    // INSTRUCTOR 기본: 담당 반 전체 공지
     if (widget.userRole == UserRole.INSTRUCTOR) {
-      _target = FsNotice.targetCourse;
+      _target = FsNotice.targetCourseAll;
     }
   }
 
@@ -657,6 +696,72 @@ class _NoticeFormDialogState extends State<_NoticeFormDialog> {
     });
   }
 
+  void _loadExistAttachments() {
+    final data  = widget.editDoc!.data() as Map<String, dynamic>;
+    final paths = (data[FsNotice.attachments] as List?)?.cast<String>() ?? [];
+    for (final p in paths) {
+      _existAttachPaths.add(p);
+      _existAttachNames.add(p.split('/').last);
+    }
+  }
+
+  // file_picker size 속성 사용 — dart:io File 금지 (웹 크래시 방지)
+  Future<void> _pickAttachment() async {
+    final total = _existAttachPaths.length + _newAttachFiles.length;
+    if (total >= _maxAttach) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('첨부파일은 최대 3개까지 가능합니다.'),
+            backgroundColor: Colors.orange),
+      );
+      return;
+    }
+    final result = await FilePicker.platform.pickFiles(
+      allowMultiple: false,
+      withData: false,
+    );
+    if (result == null || result.files.isEmpty || !mounted) return;
+
+    final pf   = result.files.first;
+    final size = pf.size; // file_picker 제공 size (웹/모바일 공통)
+
+    if (size > _maxBytes) {
+      if (!mounted) return;
+      showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          title: const Row(children: [
+            Icon(Icons.warning_rounded, color: Colors.orange, size: 22),
+            SizedBox(width: 8),
+            Text('용량 초과', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+          ]),
+          content: const Text('파일 용량은 3MB를 초과할 수 없습니다.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('확인'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+    setState(() => _newAttachFiles.add(XFile(pf.path ?? '', name: pf.name)));
+  }
+
+  void _removeExistAttach(int index) {
+    setState(() {
+      _removedAttachPaths.add(_existAttachPaths[index]);
+      _existAttachPaths.removeAt(index);
+      _existAttachNames.removeAt(index);
+    });
+  }
+
+  void _removeNewAttach(int index) {
+    setState(() => _newAttachFiles.removeAt(index));
+  }
+
   void _wrapSelection(String open, String close) {
     final sel  = _contentCtrl.selection;
     if (!sel.isValid) return;
@@ -680,15 +785,34 @@ class _NoticeFormDialogState extends State<_NoticeFormDialog> {
     }
     setState(() => _saving = true);
 
-    final payload = <String, dynamic>{
-      FsNotice.title:      _titleCtrl.text.trim(),
-      FsNotice.content:    _contentCtrl.text.trim(),
-      FsNotice.target:     _target,
-      FsNotice.courseId:   _target == FsNotice.targetCourse ? _selectedCourseId : null,
-      FsNotice.inlineImgs: _imgPaths,
-    };
-
     try {
+      final now = DateTime.now();
+
+      // 신규 첨부파일 Storage 업로드
+      final uploadedPaths = List<String>.from(_existAttachPaths);
+      for (final xf in _newAttachFiles) {
+        final bytes = await xf.readAsBytes();
+        final path =
+            '${StoragePath.attachmentPath(StoragePath.boardNotice, now.year, now.month)}'
+            '${now.millisecondsSinceEpoch}_${xf.name}';
+        await FirebaseStorage.instance.ref(path).putData(bytes);
+        uploadedPaths.add(path);
+      }
+
+      // 수정 시 제거된 파일 Hard Delete
+      for (final path in _removedAttachPaths) {
+        try { await FirebaseStorage.instance.ref(path).delete(); } catch (_) {}
+      }
+
+      final payload = <String, dynamic>{
+        FsNotice.title:       _titleCtrl.text.trim(),
+        FsNotice.content:     _contentCtrl.text.trim(),
+        FsNotice.target:      _target,
+        FsNotice.courseId:    _target == FsNotice.targetCourse ? _selectedCourseId : null,
+        FsNotice.inlineImgs:  _imgPaths,
+        FsNotice.attachments: uploadedPaths,
+      };
+
       if (_isEdit) {
         await FirebaseFirestore.instance
             .collection(FsCol.notices)
@@ -699,7 +823,6 @@ class _NoticeFormDialogState extends State<_NoticeFormDialog> {
           ...payload,
           FsNotice.authorId:   widget.authorUid,
           FsNotice.authorName: widget.userName,
-          FsNotice.attachments: [],
           FsNotice.isDeleted:  false,
           FsNotice.createdAt:  StoragePath.nowCreatedAt(),
         });
@@ -792,6 +915,15 @@ class _NoticeFormDialogState extends State<_NoticeFormDialog> {
                     _buildLabel('내용', required: true),
                     const SizedBox(height: 6),
                     _buildSmartEditor(),
+                    const SizedBox(height: 20),
+
+                    // 5. 첨부파일
+                    _buildLabel('첨부파일'),
+                    const SizedBox(height: 4),
+                    const Text('최대 3개 · 각 3MB 이하',
+                        style: TextStyle(fontSize: 11, color: Color(0xFF9E9E9E))),
+                    const SizedBox(height: 8),
+                    _buildAttachSection(),
                     const SizedBox(height: 28),
 
                     // 저장 버튼
@@ -830,34 +962,75 @@ class _NoticeFormDialogState extends State<_NoticeFormDialog> {
     );
   }
 
-  // 공지 유형 선택 (전체/반별)
+  // 공지 대상 선택 (역할별 분기)
   Widget _buildTargetSelector() {
-    final bool canSelectAll = widget.userRole == UserRole.SUPER_ADMIN;
+    // INSTRUCTOR: 담당 반 전체 / 특정 반
+    if (widget.userRole == UserRole.INSTRUCTOR) {
+      return Row(children: [
+        Expanded(
+          child: Semantics(
+            label: '담당 반 전체 선택 버튼입니다.',
+            child: _TargetChip(
+              label: '담당 반 전체',
+              icon: Icons.groups_rounded,
+              selected: _target == FsNotice.targetCourseAll,
+              enabled: true,
+              onTap: () => setState(() => _target = FsNotice.targetCourseAll),
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Semantics(
+            label: '특정 반 선택 버튼입니다.',
+            child: _TargetChip(
+              label: '특정 반',
+              icon: Icons.school_rounded,
+              selected: _target == FsNotice.targetCourse,
+              enabled: true,
+              onTap: () => setState(() => _target = FsNotice.targetCourse),
+            ),
+          ),
+        ),
+      ]);
+    }
+    // SUPER_ADMIN: 전체(교사+학생) / 전체 교사 / 전체 학생
     return Row(children: [
       Expanded(
         child: Semantics(
-          label: '전체 공지 선택 버튼입니다.',
+          label: '전체 대상 공지 선택 버튼입니다.',
           child: _TargetChip(
-            label: '전체 공지',
+            label: '전체',
             icon: Icons.public_rounded,
             selected: _target == FsNotice.targetAll,
-            enabled: canSelectAll,
-            onTap: canSelectAll
-                ? () => setState(() => _target = FsNotice.targetAll)
-                : null,
+            enabled: true,
+            onTap: () => setState(() => _target = FsNotice.targetAll),
           ),
         ),
       ),
-      const SizedBox(width: 12),
+      const SizedBox(width: 8),
       Expanded(
         child: Semantics(
-          label: '반별 공지 선택 버튼입니다.',
+          label: '전체 교사 대상 선택 버튼입니다.',
           child: _TargetChip(
-            label: '반별 공지',
-            icon: Icons.school_rounded,
-            selected: _target == FsNotice.targetCourse,
+            label: '전체 교사',
+            icon: Icons.person_rounded,
+            selected: _target == FsNotice.targetTeachers,
             enabled: true,
-            onTap: () => setState(() => _target = FsNotice.targetCourse),
+            onTap: () => setState(() => _target = FsNotice.targetTeachers),
+          ),
+        ),
+      ),
+      const SizedBox(width: 8),
+      Expanded(
+        child: Semantics(
+          label: '전체 학생 대상 선택 버튼입니다.',
+          child: _TargetChip(
+            label: '전체 학생',
+            icon: Icons.school_rounded,
+            selected: _target == FsNotice.targetStudents,
+            enabled: true,
+            onTap: () => setState(() => _target = FsNotice.targetStudents),
           ),
         ),
       ),
@@ -967,6 +1140,45 @@ class _NoticeFormDialogState extends State<_NoticeFormDialog> {
                 tooltip: '밑줄',
                 constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
                 padding: EdgeInsets.zero,
+              ),
+            ),
+            Semantics(
+              label: '텍스트 색상 선택 버튼입니다.',
+              child: PopupMenuButton<String>(
+                tooltip: '텍스트 색상',
+                offset: const Offset(0, 36),
+                icon: const Icon(Icons.format_color_text_rounded, size: 20),
+                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                padding: EdgeInsets.zero,
+                onSelected: (hex) =>
+                    _wrapSelection('<font color="$hex">', '</font>'),
+                itemBuilder: (_) {
+                  final items = [
+                    ('빨강', '#D32F2F', const Color(0xFFD32F2F)),
+                    ('파랑', '#1565C0', const Color(0xFF1565C0)),
+                    ('초록', '#2E7D32', const Color(0xFF2E7D32)),
+                    ('주황', '#E65100', const Color(0xFFE65100)),
+                    ('보라', '#6A1B9A', const Color(0xFF6A1B9A)),
+                    ('검정', '#212121', const Color(0xFF212121)),
+                  ];
+                  return items
+                      .map((c) => PopupMenuItem<String>(
+                            value: c.$2,
+                            child: Row(children: [
+                              Container(
+                                width: 16,
+                                height: 16,
+                                decoration: BoxDecoration(
+                                    color: c.$3,
+                                    borderRadius: BorderRadius.circular(3)),
+                              ),
+                              const SizedBox(width: 8),
+                              Text(c.$1,
+                                  style: const TextStyle(fontSize: 13)),
+                            ]),
+                          ))
+                      .toList();
+                },
               ),
             ),
             const VerticalDivider(
@@ -1089,6 +1301,74 @@ class _NoticeFormDialogState extends State<_NoticeFormDialog> {
           ),
         ],
       ],
+    );
+  }
+
+  Widget _buildAttachSection() {
+    final totalCount = _existAttachPaths.length + _newAttachFiles.length;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        ..._existAttachPaths.asMap().entries.map((e) => _buildAttachTile(
+              name: _existAttachNames[e.key],
+              onRemove: () => _removeExistAttach(e.key),
+              isNew: false,
+            )),
+        ..._newAttachFiles.asMap().entries.map((e) => _buildAttachTile(
+              name: e.value.name,
+              onRemove: () => _removeNewAttach(e.key),
+              isNew: true,
+            )),
+        if (totalCount < _maxAttach)
+          Semantics(
+            label: '첨부파일 추가 버튼입니다.',
+            child: OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                foregroundColor: _blue,
+                side: const BorderSide(color: _blue),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8)),
+                minimumSize: Size.zero,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              ),
+              onPressed: _pickAttachment,
+              icon: const Icon(Icons.attach_file_rounded, size: 16),
+              label: Text('파일 추가 ($totalCount/$_maxAttach)',
+                  style: const TextStyle(fontSize: 13)),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildAttachTile(
+      {required String name,
+      required VoidCallback onRemove,
+      required bool isNew}) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(children: [
+        const Icon(Icons.insert_drive_file_rounded,
+            size: 16, color: Color(0xFF757575)),
+        const SizedBox(width: 6),
+        Expanded(
+            child: Text(name,
+                style: const TextStyle(fontSize: 12),
+                overflow: TextOverflow.ellipsis)),
+        if (isNew)
+          const Text('신규',
+              style: TextStyle(fontSize: 10, color: Color(0xFF00897B))),
+        const SizedBox(width: 4),
+        Semantics(
+          label: '$name 첨부파일 삭제 버튼입니다.',
+          child: GestureDetector(
+            onTap: onRemove,
+            child: const Icon(Icons.close_rounded,
+                size: 16, color: Color(0xFFD32F2F)),
+          ),
+        ),
+      ]),
     );
   }
 
