@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../enums/user_role.dart';
+import 'auth_service.dart';
 import 'firestore_keys.dart';
 import '../../features/login/login_intro_page.dart';
 import '../../features/manage/admin_dashboard_page.dart';
@@ -51,10 +52,13 @@ class _RoleRouterState extends State<_RoleRouter> {
   @override
   void initState() {
     super.initState();
-    _userFuture = FirebaseFirestore.instance
-        .collection(FsCol.users)
-        .doc(widget.uid)
-        .get();
+    // AuthService에 현재 사용자 캐시 + 문서 스냅샷을 동시에 활용
+    _userFuture = AuthService.instance.loadUser(widget.uid).then((_) {
+      return FirebaseFirestore.instance
+          .collection(FsCol.users)
+          .doc(widget.uid)
+          .get();
+    });
   }
 
   @override
@@ -94,12 +98,11 @@ class _RoleRouterState extends State<_RoleRouter> {
     if (_redirecting) return;
     _redirecting = true;
     WidgetsBinding.instance.addPostFrameCallback((_) async {
+      AuthService.instance.clear();
       await FirebaseAuth.instance.signOut();
-      // StreamBuilder가 signOut 감지 → LoginIntroPage 자동 렌더링
     });
   }
 
-  // 권한 없음(STUDENT) 처리 — SnackBar + 로그아웃
   void _redirectUnauthorized() {
     if (_redirecting) return;
     _redirecting = true;
@@ -112,8 +115,8 @@ class _RoleRouterState extends State<_RoleRouter> {
           duration: Duration(seconds: 3),
         ),
       );
+      AuthService.instance.clear();
       await FirebaseAuth.instance.signOut();
-      // StreamBuilder가 signOut 감지 → LoginIntroPage 자동 렌더링
     });
   }
 }

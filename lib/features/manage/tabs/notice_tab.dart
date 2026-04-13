@@ -917,13 +917,15 @@ class _NoticeFormDialogState extends State<_NoticeFormDialog> {
                     _buildSmartEditor(),
                     const SizedBox(height: 20),
 
-                    // 5. 첨부파일
-                    _buildLabel('첨부파일'),
-                    const SizedBox(height: 4),
-                    const Text('최대 3개 · 각 3MB 이하',
-                        style: TextStyle(fontSize: 11, color: Color(0xFF9E9E9E))),
-                    const SizedBox(height: 8),
-                    _buildAttachSection(),
+                    // 5. 첨부파일 (숨김)
+                    if (false) ...[
+                      _buildLabel('첨부파일'),
+                      const SizedBox(height: 4),
+                      const Text('최대 3개 · 각 3MB 이하',
+                          style: TextStyle(fontSize: 11, color: Color(0xFF9E9E9E))),
+                      const SizedBox(height: 8),
+                      _buildAttachSection(),
+                    ],
                     const SizedBox(height: 28),
 
                     // 저장 버튼
@@ -1243,6 +1245,22 @@ class _NoticeFormDialogState extends State<_NoticeFormDialog> {
                 (v == null || v.trim().isEmpty) ? '내용을 입력해 주세요.' : null,
           ),
         ),
+        // 미리보기 영역
+        const SizedBox(height: 12),
+        Row(children: const [
+          Icon(Icons.preview_rounded, size: 14, color: Color(0xFF757575)),
+          SizedBox(width: 4),
+          Text('미리보기',
+              style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF757575))),
+        ]),
+        const SizedBox(height: 4),
+        ValueListenableBuilder<TextEditingValue>(
+          valueListenable: _contentCtrl,
+          builder: (_, val, __) => _buildPreviewBox(val.text),
+        ),
         if (_imgPaths.isNotEmpty) ...[
           const SizedBox(height: 12),
           const Text('첨부 이미지',
@@ -1302,6 +1320,96 @@ class _NoticeFormDialogState extends State<_NoticeFormDialog> {
         ],
       ],
     );
+  }
+
+  Widget _buildPreviewBox(String text) {
+    return Container(
+      width: double.infinity,
+      constraints: const BoxConstraints(minHeight: 60),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: const Color(0xFFE0E0E0)),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: text.trim().isEmpty
+          ? const Text('내용을 입력하면 미리보기가 표시됩니다.',
+              style: TextStyle(color: Color(0xFFBDBDBD), fontSize: 13))
+          : RichText(
+              text: TextSpan(
+                style: const TextStyle(
+                    color: Color(0xFF1A1A2E), fontSize: 14, height: 1.6),
+                children: _parseHtmlSpans(text),
+              ),
+            ),
+    );
+  }
+
+  // `<b>`, `<i>`, `<u>`, `<font color>` 태그를 파싱해 InlineSpan 목록으로 변환
+  List<InlineSpan> _parseHtmlSpans(String html) {
+    final spans = <InlineSpan>[];
+    final tagRe = RegExp(r'<(/?)(\w+)([^>]*)>', caseSensitive: false);
+    int boldDepth = 0, italicDepth = 0, underlineDepth = 0;
+    final colorStack = <Color?>[];
+
+    void addText(String text) {
+      if (text.isEmpty) return;
+      spans.add(TextSpan(
+        text: text,
+        style: TextStyle(
+          fontWeight: boldDepth > 0 ? FontWeight.bold : FontWeight.normal,
+          fontStyle: italicDepth > 0 ? FontStyle.italic : FontStyle.normal,
+          decoration:
+              underlineDepth > 0 ? TextDecoration.underline : TextDecoration.none,
+          color: colorStack.isNotEmpty ? colorStack.last : null,
+        ),
+      ));
+    }
+
+    int pos = 0;
+    for (final m in tagRe.allMatches(html)) {
+      addText(html.substring(pos, m.start));
+      pos = m.end;
+      final closing = m.group(1) == '/';
+      final tag = m.group(2)!.toLowerCase();
+      final attrs = m.group(3) ?? '';
+      if (!closing) {
+        switch (tag) {
+          case 'b':
+            boldDepth++;
+          case 'i':
+            italicDepth++;
+          case 'u':
+            underlineDepth++;
+          case 'font':
+            final cm =
+                RegExp(r'color="([^"]+)"', caseSensitive: false).firstMatch(attrs);
+            if (cm != null) {
+              final hex = cm.group(1)!.replaceAll('#', '');
+              try {
+                colorStack.add(Color(int.parse('FF$hex', radix: 16)));
+              } catch (_) {
+                colorStack.add(null);
+              }
+            } else {
+              colorStack.add(null);
+            }
+        }
+      } else {
+        switch (tag) {
+          case 'b':
+            if (boldDepth > 0) boldDepth--;
+          case 'i':
+            if (italicDepth > 0) italicDepth--;
+          case 'u':
+            if (underlineDepth > 0) underlineDepth--;
+          case 'font':
+            if (colorStack.isNotEmpty) colorStack.removeLast();
+        }
+      }
+    }
+    addText(html.substring(pos));
+    return spans;
   }
 
   Widget _buildAttachSection() {

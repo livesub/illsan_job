@@ -10,6 +10,7 @@ import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../../core/utils/firestore_keys.dart';
+import '../../../core/utils/firebase_password_service.dart';
 
 class InstructorHomeTab extends StatefulWidget {
   const InstructorHomeTab({super.key});
@@ -18,9 +19,13 @@ class InstructorHomeTab extends StatefulWidget {
   State<InstructorHomeTab> createState() => _InstructorHomeTabState();
 }
 
-class _InstructorHomeTabState extends State<InstructorHomeTab> {
+class _InstructorHomeTabState extends State<InstructorHomeTab>
+    with SingleTickerProviderStateMixin {
   static const Color _blue = Color(0xFF1565C0);
   final _db = FirebaseFirestore.instance;
+
+  late final TabController _tabController;
+  int _tabIndex = 0;
 
   String _uid = '';
   List<QueryDocumentSnapshot> _myCourses = [];
@@ -33,8 +38,20 @@ class _InstructorHomeTabState extends State<InstructorHomeTab> {
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 2, vsync: this);
+    _tabController.addListener(() {
+      if (!_tabController.indexIsChanging) {
+        setState(() => _tabIndex = _tabController.index);
+      }
+    });
     _uid = FirebaseAuth.instance.currentUser?.uid ?? '';
     _loadData();
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadData() async {
@@ -138,9 +155,7 @@ class _InstructorHomeTabState extends State<InstructorHomeTab> {
             const SizedBox(height: 24),
             _buildCoursesSection(),
             const SizedBox(height: 24),
-            _buildPendingStudentsSection(),
-            const SizedBox(height: 24),
-            _buildJobApplicationsSection(),
+            _buildTabSection(),
             const SizedBox(height: 24),
           ],
         ),
@@ -168,7 +183,7 @@ class _InstructorHomeTabState extends State<InstructorHomeTab> {
               child: _CourseCard(
                 courseName: courseName,
                 studentCount: studentCount,
-                onDetail: () => _showCourseDetail(courseName),
+                onDetail: () => _showCourseDetail(doc.id, courseName),
               ),
             );
           }).toList()),
@@ -176,61 +191,87 @@ class _InstructorHomeTabState extends State<InstructorHomeTab> {
     );
   }
 
-  // ── 가입 승인 대기 섹션 ────────────────────────────────
-  Widget _buildPendingStudentsSection() {
-    return _SectionCard(
-      title: '오늘 가입 승인 대기 (${_pendingStudents.length}건)',
-      child: _pendingStudents.isEmpty
-          ? _emptyText('승인 대기 중인 학생이 없습니다.')
-          : Column(
-              children: _pendingStudents.map((doc) {
-                final data = doc.data() as Map<String, dynamic>;
-                final name = data[FsUser.name] as String? ?? '-';
-                final courseId = data[FsUser.courseId] as String?;
-                final courseName = _courseNameById(courseId);
-                return Semantics(
-                  label: '[$courseName] $name 학생 승인 대기 항목',
-                  button: true,
-                  child: _PendingStudentTile(
-                    name: name,
-                    courseName: courseName,
-                    onTap: () => _showStudentApprovalDialog(doc),
-                  ),
-                );
-              }).toList(),
+  // ── 중단 탭 섹션 (가입 승인 / 구직 신청) ──────────────
+  Widget _buildTabSection() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 10, offset: const Offset(0, 4))],
+      ),
+      child: Column(
+        children: [
+          Container(
+            decoration: const BoxDecoration(
+              color: Color(0xFF1565C0),
+              borderRadius: BorderRadius.only(topLeft: Radius.circular(14), topRight: Radius.circular(14)),
             ),
+            child: TabBar(
+              controller: _tabController,
+              labelColor: Colors.white,
+              unselectedLabelColor: Colors.white70,
+              indicatorColor: Colors.white,
+              indicatorWeight: 3,
+              dividerColor: Colors.transparent,
+              labelStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+              unselectedLabelStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w400),
+              tabs: [
+                Tab(text: '가입 승인 대기 (${_pendingStudents.length})'),
+                Tab(text: '구직 신청 대기 (${_pendingJobApps.length})'),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: _tabIndex == 0
+                ? _buildPendingStudentsList()
+                : _buildJobApplicationsList(),
+          ),
+        ],
+      ),
     );
   }
 
-  // ── 구직 신청 대기 섹션 ────────────────────────────────
-  Widget _buildJobApplicationsSection() {
-    return _SectionCard(
-      title: '구직 신청 대기 (${_pendingJobApps.length}건)',
-      child: _pendingJobApps.isEmpty
-          ? _emptyText('대기 중인 구직 신청이 없습니다.')
-          : ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 320),
-              child: SingleChildScrollView(
-                child: Column(
-                  children: _pendingJobApps.map((doc) {
-                    final data = doc.data() as Map<String, dynamic>;
-                    final jobTitle = data[FsJobApp.jobTitle] as String? ?? '-';
-                    final name = data[FsJobApp.applicantName] as String? ?? '-';
-                    final email = data[FsJobApp.applicantEmail] as String? ?? '-';
-                    final courseName = data[FsJobApp.courseName] as String? ?? '-';
-                    return Semantics(
-                      label: '$jobTitle 공고에 [$courseName] $name 학생 신청',
-                      child: _JobAppTile(
-                        jobTitle: jobTitle,
-                        applicantInfo: '[$courseName] $name($email)',
-                        onApprove: () => _approveJobApp(doc),
-                        onCancel: () => _cancelJobApp(doc),
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ),
-            ),
+  Widget _buildPendingStudentsList() {
+    if (_pendingStudents.isEmpty) return _emptyText('승인 대기 중인 학생이 없습니다.');
+    return Column(
+      children: _pendingStudents.map((doc) {
+        final data = doc.data() as Map<String, dynamic>;
+        final name = data[FsUser.name] as String? ?? '-';
+        final courseId = data[FsUser.courseId] as String?;
+        final courseName = _courseNameById(courseId);
+        return Semantics(
+          label: '[$courseName] $name 학생 승인 대기 항목',
+          button: true,
+          child: _PendingStudentTile(
+            name: name,
+            courseName: courseName,
+            onTap: () => _showStudentApprovalDialog(doc),
+          ),
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildJobApplicationsList() {
+    if (_pendingJobApps.isEmpty) return _emptyText('대기 중인 구직 신청이 없습니다.');
+    return Column(
+      children: _pendingJobApps.map((doc) {
+        final data = doc.data() as Map<String, dynamic>;
+        final jobTitle = data[FsJobApp.jobTitle] as String? ?? '-';
+        final name = data[FsJobApp.applicantName] as String? ?? '-';
+        final email = data[FsJobApp.applicantEmail] as String? ?? '-';
+        final courseName = data[FsJobApp.courseName] as String? ?? '-';
+        return Semantics(
+          label: '$jobTitle 공고에 [$courseName] $name 학생 신청',
+          child: _JobAppTile(
+            jobTitle: jobTitle,
+            applicantInfo: '[$courseName] $name($email)',
+            onApprove: () => _approveJobApp(doc),
+            onCancel: () => _cancelJobApp(doc),
+          ),
+        );
+      }).toList(),
     );
   }
 
@@ -267,12 +308,9 @@ class _InstructorHomeTabState extends State<InstructorHomeTab> {
     });
   }
 
-  // 학생 비밀번호 초기화 — is_temp_password: true 설정 → Cloud Function이 처리
+  // 학생 비밀번호 초기화 — FirebasePasswordService 사용
   Future<void> _resetStudentPassword(String studentUid) async {
-    await _db.collection(FsCol.users).doc(studentUid).update({
-      FsUser.isTempPw: true,
-      FsUser.tempPwPlain: FieldValue.delete(),
-    });
+    await FirebasePasswordService.resetStudentPassword(studentUid);
   }
 
   // 구직 신청 승인
@@ -339,10 +377,22 @@ class _InstructorHomeTabState extends State<InstructorHomeTab> {
     }
   }
 
-  void _showCourseDetail(String courseName) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('$courseName 상세 (준비 중)')),
+  Future<void> _showCourseDetail(String courseId, String courseName) async {
+    final result = await showDialog<_PendingTapResult?>(
+      context: context,
+      builder: (_) => _StudentManagementDialog(courseId: courseId, courseName: courseName),
     );
+    if (result != null && mounted) {
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => _StudentJobAppsPage(
+            studentUid: result.studentUid,
+            studentName: result.studentName,
+          ),
+        ),
+      );
+    }
   }
 
   String _courseNameById(String? courseId) {
@@ -846,6 +896,301 @@ class _StudentApprovalDialogState extends State<_StudentApprovalDialog> {
         SnackBar(content: Text('초기화 실패: $e'), backgroundColor: Colors.red),
       );
     }
+  }
+}
+
+// ─────────────────────────────────────────────────────────
+// 미처리 구직 탭 결과 전달용 데이터 클래스
+// ─────────────────────────────────────────────────────────
+class _PendingTapResult {
+  final String studentUid;
+  final String studentName;
+  const _PendingTapResult(this.studentUid, this.studentName);
+}
+
+// ─────────────────────────────────────────────────────────
+// 반 학생 목록 + 비밀번호 초기화 다이얼로그
+// ─────────────────────────────────────────────────────────
+class _StudentManagementDialog extends StatefulWidget {
+  final String courseId;
+  final String courseName;
+  const _StudentManagementDialog({required this.courseId, required this.courseName});
+
+  @override
+  State<_StudentManagementDialog> createState() => _StudentManagementDialogState();
+}
+
+class _StudentManagementDialogState extends State<_StudentManagementDialog> {
+  static const Color _blue = Color(0xFF1565C0);
+  List<QueryDocumentSnapshot> _students = [];
+  Map<String, int> _pendingJobCounts = {};
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadStudents();
+  }
+
+  Future<void> _loadStudents() async {
+    final db = FirebaseFirestore.instance;
+    // courseId 단일 필터 → 클라이언트에서 role/status/isDeleted 필터 (복합 인덱스 회피)
+    final snap = await db
+        .collection(FsCol.users)
+        .where(FsUser.courseId, isEqualTo: widget.courseId)
+        .get();
+    final students = snap.docs.where((d) {
+      final data = d.data() as Map<String, dynamic>;
+      return (data[FsUser.role] as String?) == FsUser.roleStudent &&
+          (data[FsUser.status] as String?) == FsUser.statusApproved &&
+          !((data[FsUser.isDeleted] as bool?) ?? false);
+    }).toList();
+
+    final counts = <String, int>{};
+    for (final doc in students) {
+      final countSnap = await db
+          .collection(FsCol.jobApplications)
+          .where(FsJobApp.applicantId, isEqualTo: doc.id)
+          .where(FsJobApp.status, isEqualTo: FsJobApp.statusPending)
+          .get();
+      counts[doc.id] = countSnap.docs.length;
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _students = students;
+      _pendingJobCounts = counts;
+      _loading = false;
+    });
+  }
+
+  Future<void> _doResetPassword(String uid, String name) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('비밀번호 초기화'),
+        content: Text('$name 학생의 비밀번호를 초기화하시겠습니까?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('취소')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: _blue),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('초기화', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true || !mounted) return;
+    try {
+      final tempPw = await FirebasePasswordService.resetStudentPassword(uid);
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('초기화 완료'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('$name 학생 임시 비밀번호:'),
+              const SizedBox(height: 8),
+              SelectableText(tempPw,
+                  style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w700, fontFamily: 'monospace')),
+            ],
+          ),
+          actions: [
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: _blue),
+              onPressed: () => Navigator.pop(context),
+              child: const Text('확인', style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('오류'),
+          content: Text('초기화 실패: $e'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('확인')),
+          ],
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Semantics(
+        header: true,
+        child: Text('${widget.courseName} 학생 목록',
+            style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+      ),
+      content: SizedBox(
+        width: 360,
+        child: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : _students.isEmpty
+                ? const Text('등록된 학생이 없습니다.',
+                    style: TextStyle(color: Color(0xFF757575), fontSize: 14))
+                : ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 400),
+                    child: ListView.separated(
+                      shrinkWrap: true,
+                      itemCount: _students.length,
+                      separatorBuilder: (_, __) => const Divider(height: 1),
+                      itemBuilder: (_, i) {
+                        final doc = _students[i];
+                        final data = doc.data() as Map<String, dynamic>;
+                        final name = data[FsUser.name] as String? ?? '-';
+                        final email = data[FsUser.email] as String? ?? '-';
+                        final pendingCount = _pendingJobCounts[doc.id] ?? 0;
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(name,
+                                        style: const TextStyle(
+                                            fontSize: 14, fontWeight: FontWeight.w600,
+                                            color: Color(0xFF1A1A2E))),
+                                    Text(email,
+                                        style: const TextStyle(
+                                            fontSize: 12, color: Color(0xFF757575))),
+                                  ],
+                                ),
+                              ),
+                              if (pendingCount > 0)
+                                Semantics(
+                                  label: '미처리 구직 신청 $pendingCount건 보기',
+                                  button: true,
+                                  child: TextButton(
+                                    onPressed: () => Navigator.pop(
+                                        context, _PendingTapResult(doc.id, name)),
+                                    child: Text('구직 $pendingCount건',
+                                        style: const TextStyle(
+                                            color: Color(0xFF1565C0), fontSize: 12)),
+                                  ),
+                                ),
+                              Semantics(
+                                label: '$name 비밀번호 초기화',
+                                button: true,
+                                child: IconButton(
+                                  icon: const Icon(Icons.lock_reset_rounded, size: 18),
+                                  tooltip: '비밀번호 초기화',
+                                  onPressed: () => _doResetPassword(doc.id, name),
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('닫기'),
+        ),
+      ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────
+// 학생별 구직 신청 현황 페이지 (PENDING만 표시)
+// ─────────────────────────────────────────────────────────
+class _StudentJobAppsPage extends StatefulWidget {
+  final String studentUid;
+  final String studentName;
+  const _StudentJobAppsPage({required this.studentUid, required this.studentName});
+
+  @override
+  State<_StudentJobAppsPage> createState() => _StudentJobAppsPageState();
+}
+
+class _StudentJobAppsPageState extends State<_StudentJobAppsPage> {
+  List<QueryDocumentSnapshot> _jobApps = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadJobApps();
+  }
+
+  Future<void> _loadJobApps() async {
+    final snap = await FirebaseFirestore.instance
+        .collection(FsCol.jobApplications)
+        .where(FsJobApp.applicantId, isEqualTo: widget.studentUid)
+        .where(FsJobApp.status, isEqualTo: FsJobApp.statusPending)
+        .orderBy(FsJobApp.appliedAt, descending: true)
+        .get();
+    if (!mounted) return;
+    setState(() {
+      _jobApps = snap.docs;
+      _loading = false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('${widget.studentName} 구직 신청 현황'),
+        backgroundColor: const Color(0xFF1565C0),
+        foregroundColor: Colors.white,
+      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _jobApps.isEmpty
+              ? const Center(
+                  child: Text('미처리 구직 신청이 없습니다.',
+                      style: TextStyle(color: Color(0xFF757575), fontSize: 14)))
+              : ListView.builder(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: _jobApps.length,
+                  itemBuilder: (_, i) {
+                    final data = _jobApps[i].data() as Map<String, dynamic>;
+                    final jobTitle = data[FsJobApp.jobTitle] as String? ?? '-';
+                    final appliedAt = data[FsJobApp.appliedAt] as Timestamp?;
+                    final d = appliedAt?.toDate();
+                    final dateStr = d != null
+                        ? '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}'
+                        : '-';
+                    return Card(
+                      margin: const EdgeInsets.only(bottom: 10),
+                      child: ListTile(
+                        leading: const Icon(Icons.work_rounded, color: Color(0xFF1565C0)),
+                        title: Text(jobTitle,
+                            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                        subtitle: Text('신청일: $dateStr',
+                            style: const TextStyle(fontSize: 12, color: Color(0xFF757575))),
+                        trailing: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFFF3E0),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: const Text('대기중',
+                              style: TextStyle(
+                                  color: Color(0xFFE65100), fontSize: 12,
+                                  fontWeight: FontWeight.w600)),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+    );
   }
 }
 

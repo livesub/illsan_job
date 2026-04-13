@@ -26,7 +26,7 @@ class _MemberTabState extends State<MemberTab> {
 
   // ── 교사 탭 (클라이언트 사이드 필터+페이징) ──────────────────
   List<QueryDocumentSnapshot> _allTeachers = [];
-  bool _teachersLoading = false;
+  bool _teachersLoading = true;
   final TextEditingController _teacherSearchCtrl = TextEditingController();
   String _teacherCourseFilter = '전체';
   int _teacherPage = 1;
@@ -881,12 +881,26 @@ class _TeacherRegisterDialogState extends State<_TeacherRegisterDialog> {
       
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(_authError(e.code)), backgroundColor: Colors.red));
+      showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          title: const Text('오류'),
+          content: Text(_authError(e.code)),
+          actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('확인'))],
+        ),
+      );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('등록 실패: $e'), backgroundColor: Colors.red));
+      showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          title: const Text('오류'),
+          content: Text('등록 실패: $e'),
+          actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('확인'))],
+        ),
+      );
     } finally {
       // 6. 가입 성공 여부와 상관없이, 작업이 끝나면 임시 앱을 메모리에서 흔적 없이 파괴합니다.
       if (tempApp != null) {
@@ -922,30 +936,32 @@ class _TeacherRegisterDialogState extends State<_TeacherRegisterDialog> {
                   IconButton(icon: const Icon(Icons.close_rounded), onPressed: () => Navigator.of(context).pop()),
                 ]),
                 const SizedBox(height: 16),
-                Center(child: GestureDetector(
-                  onTap: _pickPhoto,
-                  child: Semantics(label: '프로필 사진 선택 버튼입니다.',
-                    child: CircleAvatar(
-                      radius: 40,
-                      backgroundColor: const Color(0xFFE3F2FD),
-                      backgroundImage: _photoFile?.bytes != null ? MemoryImage(_photoFile!.bytes!) : null,
-                      child: _photoFile == null ? const Icon(Icons.add_a_photo_rounded, color: _blue, size: 28) : null,
+                if (false) ...[
+                  Center(child: GestureDetector(
+                    onTap: _pickPhoto,
+                    child: Semantics(label: '프로필 사진 선택 버튼입니다.',
+                      child: CircleAvatar(
+                        radius: 40,
+                        backgroundColor: const Color(0xFFE3F2FD),
+                        backgroundImage: _photoFile?.bytes != null ? MemoryImage(_photoFile!.bytes!) : null,
+                        child: _photoFile == null ? const Icon(Icons.add_a_photo_rounded, color: _blue, size: 28) : null,
+                      ),
                     ),
-                  ),
-                )),
-                const SizedBox(height: 20),
-                _field('이름', _nameCtrl,
-                    validator: (v) => (v == null || v.trim().isEmpty) ? '이름을 입력해 주세요.' : null),
-                const SizedBox(height: 14),
-                _field('전화번호', _phoneCtrl, keyboardType: TextInputType.phone,
-                    validator: (v) => (v == null || v.trim().isEmpty) ? '전화번호를 입력해 주세요.' : null),
-                const SizedBox(height: 14),
-                _field('이메일', _emailCtrl, keyboardType: TextInputType.emailAddress,
+                  )),
+                  const SizedBox(height: 20),
+                ],
+                _field('이메일(ID)', _emailCtrl, keyboardType: TextInputType.emailAddress,
                     validator: (v) {
                       if (v == null || v.trim().isEmpty) return '이메일을 입력해 주세요.';
                       if (!v.contains('@')) return '올바른 이메일 형식이 아닙니다.';
                       return null;
                     }),
+                const SizedBox(height: 14),
+                _field('이름', _nameCtrl,
+                    validator: (v) => (v == null || v.trim().isEmpty) ? '이름을 입력해 주세요.' : null),
+                const SizedBox(height: 14),
+                _field('전화번호', _phoneCtrl, keyboardType: TextInputType.phone,
+                    validator: (v) => (v == null || v.trim().isEmpty) ? '전화번호를 입력해 주세요.' : null),
                 const SizedBox(height: 14),
                 _pwField('비밀번호', _pwCtrl, _obscurePw, () => setState(() => _obscurePw = !_obscurePw),
                     validator: (v) {
@@ -1179,7 +1195,7 @@ class _TeacherEditDialogState extends State<_TeacherEditDialog> {
                   IconButton(icon: const Icon(Icons.close_rounded), onPressed: () => Navigator.of(context).pop()),
                 ]),
                 const SizedBox(height: 16),
-                Center(child: GestureDetector(
+                if (false) Center(child: GestureDetector(
                   onTap: _pickPhoto,
                   child: Semantics(label: '프로필 사진 변경 버튼입니다.',
                     child: Stack(children: [
@@ -1202,7 +1218,6 @@ class _TeacherEditDialogState extends State<_TeacherEditDialog> {
                     ]),
                   ),
                 )),
-                const SizedBox(height: 20),
                 _field('이름', _nameCtrl,
                     validator: (v) => (v == null || v.trim().isEmpty) ? '이름을 입력해 주세요.' : null),
                 const SizedBox(height: 14),
