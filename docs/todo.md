@@ -1,7 +1,7 @@
-## 공지사항 기능 구현 (1단계)
+# STEP 3 TODO
 
-- [ ] 1. firestore_keys.dart — FsNotice 타겟 상수 추가 (targetTeachers, targetStudents, targetCourseAll)
-- [ ] 2. notice_tab.dart — 목록 필터 로직 + 배지 표시 업데이트 (_applyFilterAndPage, _buildNoticeTile)
-- [ ] 3. notice_tab.dart — SUPER_ADMIN 3선택 / INSTRUCTOR 2선택 타겟 UI (_buildTargetSelector, initState)
-- [ ] 4. notice_tab.dart — 스마트 에디터 색상 버튼 추가 (_buildSmartEditor)
-- [ ] 5. FCM 토큰 관리 — firebase_messaging 패키지 필요, pubspec.yaml 수정 후 별도 진행
+- [ ] firestore_keys.dart — statusActive / statusGraduated / statusDropped 상수 추가
+- [ ] change_password_page.dart — 임시PW 강제변경 화면 신규 생성
+- [ ] reapply_page.dart — 졸업/중도탈락 재신청 화면 신규 생성
+- [ ] route_guard.dart — isTempPw·status 분기 로직 교체
+- [ ] login_page.dart — _login() isTempPw·status 분기 로직 교체

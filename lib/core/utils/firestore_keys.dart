@@ -84,10 +84,12 @@ class FsUser {
   static const String roleStudent    = 'STUDENT';     // 학생/수강생
 
   // ── status 상태값 상수 ───────────────────────────────────
-  // 계정 승인 상태를 나타냅니다.
-  static const String statusPending  = 'pending';   // 승인 대기 중
-  static const String statusApproved = 'approved';  // 승인 완료
-  static const String statusRejected = 'rejected';  // 승인 거절
+  static const String statusPending   = 'pending';    // 승인 대기
+  static const String statusActive    = 'active';     // 정상 활성
+  static const String statusGraduated = 'graduated';  // 졸업/수료
+  static const String statusDropped   = 'dropped';    // 중도탈락
+  // 하위 호환 보존 (기존 데이터 마이그레이션 전까지 유지)
+  static const String statusApproved  = 'approved';
 }
 
 // ─────────────────────────────────────────────────────────
@@ -192,6 +194,8 @@ class FsJob {
   static const String isDeleted        = 'is_deleted';
   // 기간 — 교사가 입력한 자유 텍스트 (예: "채용 시 마감")
   static const String period           = 'period';
+  // 조회수 — 상세 진입 시 FieldValue.increment(1)
+  static const String viewCount        = 'view_count';
   // 등록 시각 Timestamp — 고도화 대비 hidden 필드
   static const String createdTimestamp = 'created_timestamp';
   // 노출 대상 반 — ['all'] 또는 강좌 ID 목록
@@ -266,15 +270,18 @@ class FsJobApp {
 class FsJobComment {
   FsJobComment._();
 
-  static const String jobId      = 'job_id';
-  static const String content    = 'content';
-  static const String authorId   = 'author_id';
-  static const String authorName = 'author_name';
-  static const String parentId   = 'parent_id';
-  static const String isDeleted  = 'is_deleted';
-  static const String createdAt  = 'created_at';
+  static const String jobId       = 'job_id';
+  static const String content     = 'content';
+  static const String authorId    = 'author_id';
+  static const String authorName  = 'author_name';
+  static const String authorEmail = 'author_email'; // 닉네임 마스킹용
+  static const String parentId    = 'parent_id';
+  static const String isDeleted   = 'is_deleted';
+  static const String createdAt   = 'created_at';
 
-  // Soft Delete 시 content 필드를 이 값으로 교체
+  // Soft Delete 통합 문구
+  static const String deletedText   = '삭제 요청된 글입니다';
+  // 하위 호환 보존
   static const String deletedByRule = '규정에 의해 삭제된 댓글입니다';
   static const String deletedBySelf = '삭제된 글입니다';
 }

@@ -1,10 +1,13 @@
-// 라우팅 가드 — 인증 상태 + 권한(Role)을 검사하여 화면을 분기합니다.
+// 라우팅 가드 — 인증·권한·상태를 검사하여 화면을 분기합니다.
 //
 // 분기 규칙:
-//   미로그인              → LoginIntroPage
-//   Firestore 문서 없음   → signOut + LoginIntroPage
-//   STUDENT 이하 권한     → "권한이 없습니다" SnackBar + signOut → LoginIntroPage
-//   INSTRUCTOR, SUPER_ADMIN → AdminDashboardPage
+//   미로그인                         → LoginIntroPage
+//   Firestore 문서 없음 / is_deleted → signOut + LoginIntroPage
+//   status == pending                → signOut + "권한 없음"
+//   is_temp_password == true         → ChangePasswordPage
+//   STUDENT + graduated/dropped      → ReapplyPage
+//   STUDENT + active                 → StudentDashboardPage
+//   INSTRUCTOR/SUPER_ADMIN + active  → AdminDashboardPage
 
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -14,6 +17,9 @@ import 'auth_service.dart';
 import 'firestore_keys.dart';
 import '../../features/login/login_intro_page.dart';
 import '../../features/manage/admin_dashboard_page.dart';
+import '../../features/member/student_dashboard_page.dart';
+import '../../features/member/change_password_page.dart';
+import '../../features/member/reapply_page.dart';
 
 class RouteGuard extends StatelessWidget {
   const RouteGuard({super.key});
@@ -78,16 +84,48 @@ class _RoleRouterState extends State<_RoleRouter> {
           return const _Loading();
         }
 
-        final roleStr  = data[FsUser.role]  as String? ?? FsUser.roleStudent;
-        final userName = data[FsUser.name]  as String? ?? '';
-        final role     = roleStr.toUserRole();
+        final roleStr   = data[FsUser.role]      as String? ?? FsUser.roleStudent;
+        final userName  = data[FsUser.name]      as String? ?? '';
+        final status    = data[FsUser.status]    as String? ?? FsUser.statusPending;
+        final isDeleted = data[FsUser.isDeleted] as bool?   ?? false;
+        final isTempPw  = data[FsUser.isTempPw]  as bool?   ?? false;
+        final role      = roleStr.toUserRole();
 
-        // STUDENT: 관리자 페이지 접근 차단
-        if (role == UserRole.STUDENT) {
+        // 삭제 계정 차단
+        if (isDeleted) {
           _redirectUnauthorized();
           return const _Loading();
         }
 
+        // 승인 대기 차단
+        if (status == FsUser.statusPending) {
+          _redirectUnauthorized();
+          return const _Loading();
+        }
+
+        // 임시 비밀번호 → 비밀번호 변경 강제
+        if (isTempPw) {
+          return ChangePasswordPage(userRole: role, userName: userName);
+        }
+
+        if (role == UserRole.STUDENT) {
+          // 졸업·중도탈락 → 재신청 화면
+          if (status == FsUser.statusGraduated || status == FsUser.statusDropped) {
+            return ReapplyPage(status: status, userName: userName);
+          }
+          // active 아닌 경우 차단
+          if (status != FsUser.statusActive) {
+            _redirectUnauthorized();
+            return const _Loading();
+          }
+          return StudentDashboardPage(userRole: role, userName: userName);
+        }
+
+        // 교사·관리자: active만 허용
+        if (status != FsUser.statusActive) {
+          _redirectUnauthorized();
+          return const _Loading();
+        }
         return AdminDashboardPage(userRole: role, userName: userName);
       },
     );

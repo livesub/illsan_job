@@ -7,6 +7,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../core/enums/user_role.dart';
 import '../../core/utils/firestore_keys.dart';
 import '../manage/admin_dashboard_page.dart';
+import '../member/change_password_page.dart';
+import '../member/reapply_page.dart';
+import '../member/student_dashboard_page.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -64,18 +67,76 @@ class _LoginPageState extends State<LoginPage> {
         return;
       }
 
-      final data     = doc.data()!;
-      final roleStr  = data[FsUser.role]  as String? ?? FsUser.roleStudent;
-      final userName = data[FsUser.name]  as String? ?? '';
-      final role     = roleStr.toUserRole();
+      final data      = doc.data()!;
+      final roleStr   = data[FsUser.role]      as String? ?? FsUser.roleStudent;
+      final userName  = data[FsUser.name]      as String? ?? '';
+      final status    = data[FsUser.status]    as String? ?? FsUser.statusPending;
+      final isDeleted = data[FsUser.isDeleted] as bool?   ?? false;
+      final isTempPw  = data[FsUser.isTempPw]  as bool?   ?? false;
+      final role      = roleStr.toUserRole();
 
-      // 3. 권한별 즉시 강제 이동 (중간 화면 없이)
+      // 삭제·승인 대기 계정 차단
+      if (isDeleted || status == FsUser.statusPending) {
+        await FirebaseAuth.instance.signOut();
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('접근이 제한된 계정입니다. 관리자에게 문의하세요.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+
+      // 임시 비밀번호 → 비밀번호 변경 강제
+      if (isTempPw) {
+        if (!mounted) return;
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(
+            builder: (_) =>
+                ChangePasswordPage(userRole: role, userName: userName),
+          ),
+          (_) => false,
+        );
+        return;
+      }
+
+      // 학생 졸업·중도탈락 → 재신청 화면
+      if (role == UserRole.STUDENT &&
+          (status == FsUser.statusGraduated ||
+              status == FsUser.statusDropped)) {
+        if (!mounted) return;
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(
+            builder: (_) => ReapplyPage(status: status, userName: userName),
+          ),
+          (_) => false,
+        );
+        return;
+      }
+
+      // active 아닌 경우 차단
+      if (status != FsUser.statusActive) {
+        await FirebaseAuth.instance.signOut();
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('접근이 제한된 계정입니다. 관리자에게 문의하세요.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+
+      // 역할별 대시보드 이동
+      if (!mounted) return;
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(
-          builder: (_) =>
-              AdminDashboardPage(userRole: role, userName: userName),
+          builder: (_) => role == UserRole.STUDENT
+              ? StudentDashboardPage(userRole: role, userName: userName)
+              : AdminDashboardPage(userRole: role, userName: userName),
         ),
-        (_) => false, // 이전 라우트(LoginIntroPage, LoginPage) 전부 제거
+        (_) => false,
       );
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
@@ -213,7 +274,10 @@ class _LoginPageState extends State<LoginPage> {
                         ),
                         validator: (v) {
                           if (v == null || v.isEmpty) return '비밀번호를 입력해 주세요.';
-                          if (v.length < 6) return '비밀번호는 6자 이상이어야 합니다.';
+                          if (v.length < 8) return '8자 이상 입력해 주세요.';
+                          if (RegExp(r'[가-힣ㄱ-ㅎㅏ-ㅣ]').hasMatch(v)) return '한글은 사용할 수 없습니다.';
+                          if (!RegExp(r'[A-Z]').hasMatch(v)) return '대문자를 1자 이상 포함해야 합니다.';
+                          if (!RegExp(r'[!@#\$%^&*()\-_=+\[\]{};:\'",.<>?/\\|`~]').hasMatch(v)) return '특수문자를 1자 이상 포함해야 합니다.';
                           return null;
                         },
                       ),

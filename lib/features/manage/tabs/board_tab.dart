@@ -174,6 +174,7 @@ class _BoardTabState extends State<BoardTab> {
                 padding: const EdgeInsets.symmetric(horizontal: 20),
                 child: _JobCard(
                   doc: _jobs[i],
+                  index: i + 1,
                   onTap: () => _openJobDetail(_jobs[i]),
                 ),
               ),
@@ -284,22 +285,27 @@ class _BoardTabState extends State<BoardTab> {
 }
 
 // ─────────────────────────────────────────────────────────
-// 구직 공고 카드 (리스트 아이템)
+// 구직 공고 카드 (리스트 아이템) — 순번·첨부·조회수 표시
 // ─────────────────────────────────────────────────────────
 class _JobCard extends StatelessWidget {
   final QueryDocumentSnapshot doc;
+  final int index;
   final VoidCallback onTap;
-  const _JobCard({required this.doc, required this.onTap});
+  const _JobCard({required this.doc, required this.index, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    final data = doc.data() as Map<String, dynamic>;
-    final title      = data[FsJob.title]      as String? ?? '-';
-    final authorName = data[FsJob.authorName] as String? ?? '-';
-    final period     = data[FsJob.period]     as String? ?? '-';
+    final data        = doc.data() as Map<String, dynamic>;
+    final title       = data[FsJob.title]       as String? ?? '-';
+    final authorName  = data[FsJob.authorName]  as String? ?? '-';
+    final period      = data[FsJob.period]      as String? ?? '-';
+    final attachments = data[FsJob.attachments] as List?   ?? [];
+    final viewCount   = data[FsJob.viewCount]   as int?    ?? 0;
+    final hasAttach   = attachments.isNotEmpty;
 
     return Semantics(
-      label: '$title 구직 공고, $authorName 등록, 기간: $period',
+      label: '$index번 $title, $authorName 등록, 기간 $period, 조회 $viewCount회'
+          '${hasAttach ? ", 첨부파일 있음" : ""}',
       button: true,
       child: InkWell(
         onTap: onTap,
@@ -310,34 +316,78 @@ class _JobCard extends StatelessWidget {
           decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.circular(12),
-            boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 6, offset: const Offset(0, 2))],
+            boxShadow: [
+              BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.05),
+                  blurRadius: 6,
+                  offset: const Offset(0, 2))
+            ],
           ),
           child: Row(
             children: [
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF00897B).withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: const Icon(Icons.work_rounded, color: Color(0xFF00897B), size: 22),
+              // 순번
+              SizedBox(
+                width: 32,
+                child: Text('$index',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFFBDBDBD))),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(title,
-                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: Color(0xFF1A1A2E)),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis),
+                    // 제목 + 첨부파일 아이콘
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(title,
+                              style: const TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFF1A1A2E)),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis),
+                        ),
+                        if (hasAttach) ...[
+                          const SizedBox(width: 4),
+                          const Icon(Icons.attach_file_rounded,
+                              size: 14, color: Color(0xFF757575)),
+                        ],
+                      ],
+                    ),
                     const SizedBox(height: 4),
-                    Text('$authorName · $period',
-                        style: const TextStyle(fontSize: 12, color: Color(0xFF757575))),
+                    // 등록자·기간 + 조회수
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text('$authorName · $period',
+                              style: const TextStyle(
+                                  fontSize: 12, color: Color(0xFF757575)),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis),
+                        ),
+                        Row(
+                          children: [
+                            const Icon(Icons.visibility_rounded,
+                                size: 13, color: Color(0xFF9E9E9E)),
+                            const SizedBox(width: 2),
+                            Text('$viewCount',
+                                style: const TextStyle(
+                                    fontSize: 12, color: Color(0xFF9E9E9E))),
+                          ],
+                        ),
+                      ],
+                    ),
                   ],
                 ),
               ),
-              const Icon(Icons.chevron_right_rounded, color: Color(0xFF9E9E9E), size: 18),
+              const SizedBox(width: 8),
+              const Icon(Icons.chevron_right_rounded,
+                  color: Color(0xFF9E9E9E), size: 18),
             ],
           ),
         ),
@@ -372,57 +422,73 @@ class _JobDetailPageState extends State<_JobDetailPage> {
   // INSTRUCTOR/SUPER_ADMIN은 지원 버튼 자체를 숨김
   bool get _canApply => widget.userRole == UserRole.STUDENT;
 
+  // 지원 문서 ID: {jobId}_{uid} 결정론적 키로 중복 지원 방지
+  String get _appDocId => '${widget.jobDoc.id}_${widget.currentUid}';
+
   @override
   void initState() {
     super.initState();
+    _incrementViewCount();
     if (_canApply) _checkApplied();
   }
 
-  Future<void> _checkApplied() async {
-    final snap = await FirebaseFirestore.instance
-        .collection(FsCol.jobApplications)
-        .where(FsJobApp.jobId, isEqualTo: widget.jobDoc.id)
-        .where(FsJobApp.applicantId, isEqualTo: widget.currentUid)
-        .where(FsJobApp.status, whereIn: [FsJobApp.statusPending, FsJobApp.statusApproved])
-        .limit(1)
-        .get();
-    if (!mounted) return;
-    setState(() => _hasApplied = snap.docs.isNotEmpty);
+  // 상세 진입 시 조회수 +1
+  Future<void> _incrementViewCount() async {
+    await FirebaseFirestore.instance
+        .collection(FsCol.jobs)
+        .doc(widget.jobDoc.id)
+        .update({FsJob.viewCount: FieldValue.increment(1)});
   }
 
+  // 결정론적 ID로 단건 조회 — 쿼리 없이 활성 지원 여부 확인
+  Future<void> _checkApplied() async {
+    final doc = await FirebaseFirestore.instance
+        .collection(FsCol.jobApplications)
+        .doc(_appDocId)
+        .get();
+    if (!mounted) return;
+    final status = doc.data()?[FsJobApp.status] as String?;
+    setState(() => _hasApplied =
+        status == FsJobApp.statusPending || status == FsJobApp.statusApproved);
+  }
+
+  // 트랜잭션으로 중복 지원 방지 + 원자적 생성
   Future<void> _applyJob() async {
     setState(() => _applyLoading = true);
     try {
-      final userDoc = await FirebaseFirestore.instance
-          .collection(FsCol.users)
-          .doc(widget.currentUid)
-          .get();
+      final db      = FirebaseFirestore.instance;
+      final appRef  = db.collection(FsCol.jobApplications).doc(_appDocId);
+      final userDoc = await db.collection(FsCol.users).doc(widget.currentUid).get();
       final userData = userDoc.data()!;
       final jobData  = widget.jobDoc.data() as Map<String, dynamic>;
 
-      // 소속 강좌명 조회
       final courseId = userData[FsUser.courseId] as String? ?? '';
       String courseName = '';
       if (courseId.isNotEmpty) {
-        final courseDoc = await FirebaseFirestore.instance
-            .collection(FsCol.courses)
-            .doc(courseId)
-            .get();
-        courseName = (courseDoc.data()?[FsCourse.name] as String?) ?? '';
+        final courseDoc = await db.collection(FsCol.courses).doc(courseId).get();
+        courseName = courseDoc.data()?[FsCourse.name] as String? ?? '';
       }
 
-      await FirebaseFirestore.instance.collection(FsCol.jobApplications).add({
-        FsJobApp.jobId:          widget.jobDoc.id,
-        FsJobApp.jobTitle:       jobData[FsJob.title],
-        FsJobApp.authorId:       jobData[FsJob.authorId],
-        FsJobApp.applicantId:    widget.currentUid,
-        FsJobApp.applicantName:  userData[FsUser.name] ?? '',
-        FsJobApp.applicantEmail: userData[FsUser.email] ?? '',
-        FsJobApp.courseId:       courseId,
-        FsJobApp.courseName:     courseName,
-        FsJobApp.status:         FsJobApp.statusPending,
-        FsJobApp.appliedAt:      FieldValue.serverTimestamp(),
+      await db.runTransaction((txn) async {
+        final existing = await txn.get(appRef);
+        final existStatus = existing.data()?[FsJobApp.status] as String?;
+        // 활성 지원이 이미 있으면 무시
+        if (existStatus == FsJobApp.statusPending ||
+            existStatus == FsJobApp.statusApproved) return;
+        txn.set(appRef, {
+          FsJobApp.jobId:          widget.jobDoc.id,
+          FsJobApp.jobTitle:       jobData[FsJob.title],
+          FsJobApp.authorId:       jobData[FsJob.authorId],
+          FsJobApp.applicantId:    widget.currentUid,
+          FsJobApp.applicantName:  userData[FsUser.name]  ?? '',
+          FsJobApp.applicantEmail: userData[FsUser.email] ?? '',
+          FsJobApp.courseId:       courseId,
+          FsJobApp.courseName:     courseName,
+          FsJobApp.status:         FsJobApp.statusPending,
+          FsJobApp.appliedAt:      FieldValue.serverTimestamp(),
+        });
       });
+
       if (!mounted) return;
       setState(() { _hasApplied = true; _applyLoading = false; });
     } catch (e) {
@@ -437,19 +503,10 @@ class _JobDetailPageState extends State<_JobDetailPage> {
   Future<void> _cancelApply() async {
     setState(() => _applyLoading = true);
     try {
-      final snap = await FirebaseFirestore.instance
+      await FirebaseFirestore.instance
           .collection(FsCol.jobApplications)
-          .where(FsJobApp.jobId, isEqualTo: widget.jobDoc.id)
-          .where(FsJobApp.applicantId, isEqualTo: widget.currentUid)
-          .where(FsJobApp.status, isEqualTo: FsJobApp.statusPending)
-          .limit(1)
-          .get();
-      if (snap.docs.isNotEmpty) {
-        await FirebaseFirestore.instance
-            .collection(FsCol.jobApplications)
-            .doc(snap.docs.first.id)
-            .update({FsJobApp.status: FsJobApp.statusCancelled});
-      }
+          .doc(_appDocId)
+          .update({FsJobApp.status: FsJobApp.statusCancelled});
       if (!mounted) return;
       setState(() { _hasApplied = false; _applyLoading = false; });
     } catch (e) {
@@ -564,7 +621,8 @@ class _CommentSectionState extends State<_CommentSection> {
   bool _sending = false;
 
   bool get _isInstructor =>
-      widget.userRole == UserRole.INSTRUCTOR || widget.userRole == UserRole.SUPER_ADMIN;
+      widget.userRole == UserRole.INSTRUCTOR ||
+      widget.userRole == UserRole.SUPER_ADMIN;
 
   @override
   void dispose() {
@@ -572,20 +630,29 @@ class _CommentSectionState extends State<_CommentSection> {
     super.dispose();
   }
 
+  // 이메일 앞 4자리 + *** 마스킹
+  String _maskEmail(String email) {
+    if (email.isEmpty) return '****';
+    final prefix = email.contains('@') ? email.split('@').first : email;
+    if (prefix.length <= 4) return '$prefix***';
+    return '${prefix.substring(0, 4)}***';
+  }
+
   Future<void> _sendComment() async {
     final text = _inputCtrl.text.trim();
     if (text.isEmpty) return;
     setState(() => _sending = true);
     try {
-      final authorName = AuthService.instance.currentUser?.name ?? '';
+      final user = AuthService.instance.currentUser;
       await FirebaseFirestore.instance.collection(FsCol.jobComments).add({
-        FsJobComment.jobId:      widget.jobId,
-        FsJobComment.content:    text,
-        FsJobComment.authorId:   widget.currentUid,
-        FsJobComment.authorName: authorName,
-        FsJobComment.parentId:   null,
-        FsJobComment.isDeleted:  false,
-        FsJobComment.createdAt:  StoragePath.nowCreatedAt(),
+        FsJobComment.jobId:       widget.jobId,
+        FsJobComment.content:     text,
+        FsJobComment.authorId:    widget.currentUid,
+        FsJobComment.authorName:  user?.name  ?? '',
+        FsJobComment.authorEmail: user?.email ?? '', // 마스킹 표시용
+        FsJobComment.parentId:    null,
+        FsJobComment.isDeleted:   false,
+        FsJobComment.createdAt:   StoragePath.nowCreatedAt(),
       });
       _inputCtrl.clear();
     } finally {
@@ -593,22 +660,34 @@ class _CommentSectionState extends State<_CommentSection> {
     }
   }
 
-  // 가림 처리 — 본인 글: deletedBySelf, 타인 글(교사 모더레이션): deletedByRule
-  Future<void> _deleteComment(String commentId, bool isOwn) async {
-    final replaceText = isOwn
-        ? FsJobComment.deletedBySelf
-        : FsJobComment.deletedByRule;
+  // Soft Delete — 통합 문구로 content 교체
+  Future<void> _deleteComment(String commentId) async {
     await FirebaseFirestore.instance
         .collection(FsCol.jobComments)
         .doc(commentId)
         .update({
       FsJobComment.isDeleted: true,
-      FsJobComment.content:   replaceText,
+      FsJobComment.content:   FsJobComment.deletedText,
     });
   }
 
+  // 수정 — 대댓글 존재 시 차단
   Future<void> _editComment(String commentId, String currentContent) async {
-    final ctrl = TextEditingController(text: currentContent);
+    // 대댓글 존재 여부 확인
+    final repliesSnap = await FirebaseFirestore.instance
+        .collection(FsCol.jobComments)
+        .where(FsJobComment.parentId, isEqualTo: commentId)
+        .limit(1)
+        .get();
+    if (!mounted) return;
+    if (repliesSnap.docs.isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('대댓글이 있는 댓글은 수정할 수 없습니다.')),
+      );
+      return;
+    }
+
+    final ctrl   = TextEditingController(text: currentContent);
     final result = await showDialog<String>(
       context: context,
       builder: (_) => AlertDialog(
@@ -644,7 +723,6 @@ class _CommentSectionState extends State<_CommentSection> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // 댓글 스트림
         StreamBuilder<QuerySnapshot>(
           stream: FirebaseFirestore.instance
               .collection(FsCol.jobComments)
@@ -668,20 +746,24 @@ class _CommentSectionState extends State<_CommentSection> {
             }
             return Column(
               children: docs.map((doc) {
-                final data       = doc.data() as Map<String, dynamic>;
-                final authorId   = data[FsJobComment.authorId]   as String? ?? '';
-                final authorName = data[FsJobComment.authorName] as String? ?? '-';
-                final content    = data[FsJobComment.content]    as String? ?? '';
-                final isDeleted  = data[FsJobComment.isDeleted]  as bool?   ?? false;
-                final isOwn      = authorId == widget.currentUid;
+                final data        = doc.data() as Map<String, dynamic>;
+                final authorId    = data[FsJobComment.authorId]    as String? ?? '';
+                final authorEmail = data[FsJobComment.authorEmail] as String? ?? '';
+                final authorName  = data[FsJobComment.authorName]  as String? ?? '-';
+                final content     = data[FsJobComment.content]     as String? ?? '';
+                final isDeleted   = data[FsJobComment.isDeleted]   as bool?   ?? false;
+                final isOwn       = authorId == widget.currentUid;
+                // 이메일 있으면 마스킹, 없으면 이름 표시 (하위 호환)
+                final displayName = authorEmail.isNotEmpty
+                    ? _maskEmail(authorEmail)
+                    : authorName;
 
-                // 교사/관리자: 타인 댓글 삭제 + 본인 댓글 수정/삭제
-                // 그 외: 권한 없음
-                final canDelete = _isInstructor;
-                final canEdit   = _isInstructor && isOwn;
+                // 본인: 수정·삭제 / 교사·관리자: 추가로 타인 글 삭제 허용
+                final canEdit   = !isDeleted && isOwn;
+                final canDelete = !isDeleted && (isOwn || _isInstructor);
 
                 return Semantics(
-                  label: '$authorName 댓글: $content',
+                  label: '$displayName 댓글: $content',
                   child: Container(
                     margin: const EdgeInsets.only(bottom: 10),
                     padding: const EdgeInsets.all(12),
@@ -696,7 +778,7 @@ class _CommentSectionState extends State<_CommentSection> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(authorName,
+                              Text(displayName,
                                   style: const TextStyle(
                                       fontSize: 12,
                                       fontWeight: FontWeight.w600,
@@ -709,36 +791,40 @@ class _CommentSectionState extends State<_CommentSection> {
                                   color: isDeleted
                                       ? const Color(0xFF9E9E9E)
                                       : const Color(0xFF1A1A2E),
-                                  fontStyle: isDeleted ? FontStyle.italic : FontStyle.normal,
+                                  fontStyle: isDeleted
+                                      ? FontStyle.italic
+                                      : FontStyle.normal,
                                 ),
                               ),
                             ],
                           ),
                         ),
-                        if (!isDeleted) ...[
-                          if (canEdit)
-                            Semantics(
-                              label: '댓글 수정',
-                              button: true,
-                              child: IconButton(
-                                icon: const Icon(Icons.edit_rounded, size: 16, color: Color(0xFF757575)),
-                                padding: EdgeInsets.zero,
-                                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                                onPressed: () => _editComment(doc.id, content),
-                              ),
+                        if (canEdit)
+                          Semantics(
+                            label: '댓글 수정 버튼',
+                            button: true,
+                            child: IconButton(
+                              icon: const Icon(Icons.edit_rounded,
+                                  size: 16, color: Color(0xFF757575)),
+                              padding: EdgeInsets.zero,
+                              constraints:
+                                  const BoxConstraints(minWidth: 32, minHeight: 32),
+                              onPressed: () => _editComment(doc.id, content),
                             ),
-                          if (canDelete)
-                            Semantics(
-                              label: '댓글 삭제',
-                              button: true,
-                              child: IconButton(
-                                icon: const Icon(Icons.delete_rounded, size: 16, color: Colors.red),
-                                padding: EdgeInsets.zero,
-                                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                                onPressed: () => _deleteComment(doc.id, isOwn),
-                              ),
+                          ),
+                        if (canDelete)
+                          Semantics(
+                            label: '댓글 삭제 버튼',
+                            button: true,
+                            child: IconButton(
+                              icon: const Icon(Icons.delete_rounded,
+                                  size: 16, color: Colors.red),
+                              padding: EdgeInsets.zero,
+                              constraints:
+                                  const BoxConstraints(minWidth: 32, minHeight: 32),
+                              onPressed: () => _deleteComment(doc.id),
                             ),
-                        ],
+                          ),
                       ],
                     ),
                   ),
@@ -758,7 +844,8 @@ class _CommentSectionState extends State<_CommentSection> {
                 decoration: const InputDecoration(
                   hintText: '댓글을 입력하세요...',
                   border: OutlineInputBorder(),
-                  contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  contentPadding:
+                      EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 ),
                 minLines: 1,
                 maxLines: 3,
@@ -767,18 +854,21 @@ class _CommentSectionState extends State<_CommentSection> {
             ),
             const SizedBox(width: 8),
             Semantics(
-              label: '댓글 등록',
+              label: '댓글 등록 버튼',
               button: true,
               child: ElevatedButton(
                 style: ElevatedButton.styleFrom(
                     backgroundColor: _blue,
                     foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14)),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 14)),
                 onPressed: _sending ? null : _sendComment,
                 child: _sending
                     ? const SizedBox(
-                        width: 18, height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.white))
                     : const Text('등록'),
               ),
             ),
