@@ -85,17 +85,28 @@ class _CourseTabState extends State<CourseTab> {
   // 활성 교사 수를 Firestore에서 가져옵니다.
   Future<void> _loadActiveTeacherCount() async {
     try {
+      print('교사 로드 시작...');
       final snap = await FirebaseFirestore.instance
           .collection(FsCol.users)
           .where(FsUser.role, isEqualTo: FsUser.roleInstructor)
-          .where(FsUser.isDeleted, isNotEqualTo: true)
+          // 잠시 아래 줄을 주석 처리하고 테스트해 보세요 (필드 부재 확인용)
+          // .where(FsUser.isDeleted, isNotEqualTo: true) 
           .get();
+
+      print('검색된 교사 수: ${snap.docs.length}');
+      
+      // 검색된 교사가 있다면 첫 번째 문서의 데이터를 출력해 봅니다.
+      if(snap.docs.isNotEmpty) {
+        //print('첫 번째 교사 데이터: ${snap.docs.first.data()}');
+      }
+
       if (!mounted) return;
       setState(() {
         _activeTeacherCount = snap.docs.length;
         _teacherCountLoading = false;
       });
-    } catch (_) {
+    } catch (e) {
+      print('교사 로드 에러: $e'); // 에러 내용 확인
       if (!mounted) return;
       setState(() => _teacherCountLoading = false);
     }
@@ -881,6 +892,7 @@ class _CourseFormDialogState extends State<_CourseFormDialog> {
           .collection(FsCol.users)
           .where(FsUser.role, isEqualTo: FsUser.roleInstructor)
           .where(FsUser.isDeleted, isNotEqualTo: true)
+          .orderBy(FsUser.isDeleted)
           .orderBy(FsUser.name)
           .get();
 

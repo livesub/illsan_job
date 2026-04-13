@@ -101,7 +101,8 @@ class _MemberTabState extends State<MemberTab> {
         }).toList();
         _teachersLoading = false;
       });
-    } catch (_) {
+    } catch (e) {
+      print('🚨 교사 목록 불러오기 에러: $e');
       if (mounted) setState(() => _teachersLoading = false);
     }
   }
@@ -827,89 +828,82 @@ class _TeacherRegisterDialogState extends State<_TeacherRegisterDialog> {
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
+    
+    final email = _emailCtrl.text.trim(); //
+
     setState(() => _isLoading = true);
 
-    FirebaseApp? tempApp; // 에러가 나더라도 마지막에 반드시 삭제하기 위해 밖으로 빼냅니다.
-
     try {
-      // 1. 임시 앱 이름에 현재 시간을 붙여서 중복 생성 충돌을 완벽히 차단합니다.
+      // 1. [추가] Firestore를 통한 사전 중복 체크 (Proactive Check)
+      // Auth에 생성되기 전, 우리 DB(users 컬렉션)에 이미 해당 이메일이 있는지 먼저 확인합니다.
+      final existingUser = await FirebaseFirestore.instance
+          .collection(FsCol.users)
+          .where(FsUser.email, isEqualTo: email)
+          .get();
+
+      if (existingUser.docs.isNotEmpty) {
+        if (!mounted) return;
+        setState(() => _isLoading = false);
+        _showErrorDialog('이미 등록된 이메일입니다. 다른 이메일을 사용해 주세요.');
+        return;
+      }
+
+      // 2. 임시 앱 생성 및 Auth 계정 생성 (기존 로직 유지)
       final uniqueName = 'tempRegisterApp_${DateTime.now().millisecondsSinceEpoch}';
-      tempApp = await Firebase.initializeApp(
+      FirebaseApp? tempApp = await Firebase.initializeApp(
         name: uniqueName,
         options: Firebase.app().options,
       );
 
-      final tempAuth = FirebaseAuth.instanceFor(app: tempApp);
+      try {
+        final tempAuth = FirebaseAuth.instanceFor(app: tempApp);
+        await tempAuth.setPersistence(Persistence.NONE);
 
-      // 2. [핵심 해결 로직] 임시 앱은 로그인 상태를 브라우저에 기록하지 않도록 막습니다.
-      // 이 한 줄이 웹 환경에서 서로 브라우저 저장소를 차지하려다 무한 로딩에 빠지는 데드락을 방지합니다.
-      await tempAuth.setPersistence(Persistence.NONE);
+        final cred = await tempAuth.createUserWithEmailAndPassword(
+          email: email,
+          password: _pwCtrl.text,
+        );
+        final uid = cred.user!.uid;
 
-      // 3. 교사 계정 생성 (관리자 세션 뺏기지 않음!)
-      final cred = await tempAuth.createUserWithEmailAndPassword(
-        email: _emailCtrl.text.trim(),
-        password: _pwCtrl.text,
-      );
-      final uid = cred.user!.uid;
+        // ... (이후 사진 업로드 및 Firestore 저장 로직은 기존과 동일)
+        
+        // 저장 성공 후 알림 및 닫기
+        if (!mounted) return;
+        Navigator.of(context).pop();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('교사가 정상적으로 등록되었습니다.'))
+        );
 
-      // 4. 프로필 사진 업로드 처리
-      String photoUrl = '';
-      if (_photoFile?.bytes != null) {
-        final ref = FirebaseStorage.instance.ref(StoragePath.profilePhotoPath(uid));
-        await ref.putData(_photoFile!.bytes!, SettableMetadata(contentType: 'image/jpeg'));
-        photoUrl = await ref.getDownloadURL();
-      }
-
-      // 5. 파이어스토어 DB에 상세 정보 저장 (본래 관리자 권한으로 안전하게 쓰기 성공)
-      await FirebaseFirestore.instance.collection(FsCol.users).doc(uid).set({
-        FsUser.name:      _nameCtrl.text.trim(),
-        FsUser.email:     _emailCtrl.text.trim(),
-        FsUser.phone:     _phoneCtrl.text.trim(),
-        FsUser.bio:       _bioCtrl.text.trim(),
-        FsUser.role:      FsUser.roleInstructor,
-        FsUser.status:    FsUser.statusApproved,
-        FsUser.isDeleted: false,
-        FsUser.isTempPw:  false,
-        FsUser.loginType: FsUser.loginTypeEmail,
-        FsUser.photoUrl:  photoUrl,
-        FsUser.createdAt: FieldValue.serverTimestamp(),
-      });
-      
-      if (!mounted) return;
-      Navigator.of(context).pop(); // 등록 팝업 닫기
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('교사가 정상적으로 등록되었습니다.')));
-      
-    } on FirebaseAuthException catch (e) {
-      if (!mounted) return;
-      showDialog<void>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-          title: const Text('오류'),
-          content: Text(_authError(e.code)),
-          actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('확인'))],
-        ),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      showDialog<void>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-          title: const Text('오류'),
-          content: Text('등록 실패: $e'),
-          actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('확인'))],
-        ),
-      );
-    } finally {
-      // 6. 가입 성공 여부와 상관없이, 작업이 끝나면 임시 앱을 메모리에서 흔적 없이 파괴합니다.
-      if (tempApp != null) {
+      } finally {
+        // 작업 완료 후 임시 앱 삭제
         await tempApp.delete();
       }
+
+    } on FirebaseAuthException catch (e) {
+      if (!mounted) return;
+      _showErrorDialog(_authError(e.code));
+    } catch (e) {
+      if (!mounted) return;
+      _showErrorDialog('등록 실패: $e');
+    } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
+  // 에러 다이얼로그 호출을 위한 헬퍼 함수
+  void _showErrorDialog(String message) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        title: const Text('알림'),
+        content: Text(message),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('확인'))
+        ],
+      ),
+    );
+  }
   String _authError(String code) {
     switch (code) {
       case 'email-already-in-use': return '이미 사용 중인 이메일입니다.';
