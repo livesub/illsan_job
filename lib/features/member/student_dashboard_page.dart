@@ -1,6 +1,3 @@
-// 학생 전용 대시보드 — BottomNavigationBar 3탭 구조
-// Tab 0: 홈(준비 중), Tab 1: 내 지원(준비 중), Tab 2: 게시판(공지사항+구직 리스트)
-
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../core/enums/user_role.dart';
@@ -8,6 +5,8 @@ import '../manage/tabs/board_tab.dart';
 import '../login/login_intro_page.dart';
 import 'student_home_tab.dart';
 
+// 학생 전용 대시보드 — BottomNavigationBar 3탭
+// Tab 0: 홈, Tab 1: 내 지원(준비 중), Tab 2: 게시판
 class StudentDashboardPage extends StatefulWidget {
   final UserRole userRole;
   final String userName;
@@ -23,8 +22,7 @@ class StudentDashboardPage extends StatefulWidget {
 
 class _StudentDashboardPageState extends State<StudentDashboardPage> {
   static const Color _blue = Color(0xFF1565C0);
-  // Tab 2(게시판)를 기본 선택
-  int _tabIndex = 2;
+  int _tabIndex = 0;
 
   @override
   Widget build(BuildContext context) {

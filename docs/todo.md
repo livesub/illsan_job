@@ -1,7 +1,5 @@
-# STEP 3 TODO
+## STEP 3: 구직 리스트 UI + 상세 + 지원 로직 재구현
 
-- [ ] firestore_keys.dart — statusActive / statusGraduated / statusDropped 상수 추가
-- [ ] change_password_page.dart — 임시PW 강제변경 화면 신규 생성
-- [ ] reapply_page.dart — 졸업/중도탈락 재신청 화면 신규 생성
-- [ ] route_guard.dart — isTempPw·status 분기 로직 교체
-- [ ] login_page.dart — _login() isTempPw·status 분기 로직 교체
+- [ ] 1. student_home_tab.dart — CustomScrollView 전환, 구직 무한스크롤 목록 연결
+- [ ] 2. student_job_detail_page.dart — 상세 UI(본문·기간·첨부) + 조회수 증가
+- [ ] 3. student_job_detail_page.dart — 지원 이력 확인 → 지원하기/취소 로직

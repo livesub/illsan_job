@@ -4,6 +4,7 @@
 
 import 'package:flutter/material.dart';
 import 'login_page.dart';
+import '../member/student_register_page.dart';
 
 // 앱의 첫 화면입니다.
 // 상태 변경이 없으므로 StatelessWidget으로 구현합니다.
@@ -283,8 +284,8 @@ class LoginIntroPage extends StatelessWidget {
                 ),
               ),
               onPressed: () {
-                // TODO: 회원가입 페이지로 이동
-                // Navigator.push(context, MaterialPageRoute(builder: (_) => const RegisterPage()));
+                Navigator.push(context,
+                    MaterialPageRoute(builder: (_) => const StudentRegisterPage()));
               },
               child: const Text(
                 '회원가입',

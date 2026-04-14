@@ -1,6 +1,3 @@
-// 이메일/비밀번호 로그인 화면
-// 로그인 성공 시 Navigator.pop() → main.dart StreamBuilder가 대시보드로 라우팅
-
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -8,6 +5,7 @@ import '../../core/enums/user_role.dart';
 import '../../core/utils/firestore_keys.dart';
 import '../manage/admin_dashboard_page.dart';
 import '../member/change_password_page.dart';
+import '../member/pending_page.dart';
 import '../member/reapply_page.dart';
 import '../member/student_dashboard_page.dart';
 
@@ -26,7 +24,6 @@ class _LoginPageState extends State<LoginPage> {
   final _formKey   = GlobalKey<FormState>();
   final _emailCtrl = TextEditingController();
   final _pwCtrl    = TextEditingController();
-
   bool _isLoading = false;
   bool _obscurePw = true;
 
@@ -41,13 +38,13 @@ class _LoginPageState extends State<LoginPage> {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _isLoading = true);
     try {
-      // 1. Firebase Auth 인증
+      // Firebase Auth 인증
       final cred = await FirebaseAuth.instance.signInWithEmailAndPassword(
         email: _emailCtrl.text.trim(),
         password: _pwCtrl.text,
       );
 
-      // 2. Firestore users 문서에서 role 확인
+      // Firestore users 문서 조회
       final uid = cred.user!.uid;
       final doc = await FirebaseFirestore.instance
           .collection(FsCol.users)
@@ -57,13 +54,8 @@ class _LoginPageState extends State<LoginPage> {
       if (!mounted) return;
 
       if (!doc.exists || doc.data() == null) {
-        // DB 미등록 계정 → 로그아웃 후 차단
         await FirebaseAuth.instance.signOut();
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text('등록되지 않은 계정입니다. 관리자에게 문의하세요.'),
-              backgroundColor: Colors.red),
-        );
+        _showError('등록되지 않은 계정입니다. 관리자에게 문의하세요.');
         return;
       }
 
@@ -75,85 +67,74 @@ class _LoginPageState extends State<LoginPage> {
       final isTempPw  = data[FsUser.isTempPw]  as bool?   ?? false;
       final role      = roleStr.toUserRole();
 
-      // 삭제·승인 대기 계정 차단
-      if (isDeleted || status == FsUser.statusPending) {
+      // 삭제 계정 차단
+      if (isDeleted) {
         await FirebaseAuth.instance.signOut();
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('접근이 제한된 계정입니다. 관리자에게 문의하세요.'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        _showError('접근이 제한된 계정입니다. 관리자에게 문의하세요.');
+        return;
+      }
+
+      // 승인 대기 → 전용 대기 화면
+      if (status == FsUser.statusPending) {
+        if (!mounted) return;
+        _go(const PendingPage());
         return;
       }
 
       // 임시 비밀번호 → 비밀번호 변경 강제
       if (isTempPw) {
         if (!mounted) return;
-        Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(
-            builder: (_) =>
-                ChangePasswordPage(userRole: role, userName: userName),
-          ),
-          (_) => false,
-        );
+        _go(ChangePasswordPage(userRole: role, userName: userName));
         return;
       }
 
-      // 학생 졸업·중도탈락 → 재신청 화면
+      // 학생 졸업·중도탈락 → 재신청
       if (role == UserRole.STUDENT &&
           (status == FsUser.statusGraduated ||
               status == FsUser.statusDropped)) {
         if (!mounted) return;
-        Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(
-            builder: (_) => ReapplyPage(status: status, userName: userName),
-          ),
-          (_) => false,
-        );
+        _go(ReapplyPage(status: status, userName: userName));
         return;
       }
 
-      // active 아닌 경우 차단
+      // active 외 차단
       if (status != FsUser.statusActive) {
         await FirebaseAuth.instance.signOut();
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('접근이 제한된 계정입니다. 관리자에게 문의하세요.'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        _showError('접근이 제한된 계정입니다. 관리자에게 문의하세요.');
         return;
       }
 
       // 역할별 대시보드 이동
       if (!mounted) return;
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(
-          builder: (_) => role == UserRole.STUDENT
-              ? StudentDashboardPage(userRole: role, userName: userName)
-              : AdminDashboardPage(userRole: role, userName: userName),
-        ),
-        (_) => false,
-      );
+      _go(role == UserRole.STUDENT
+          ? StudentDashboardPage(userRole: role, userName: userName)
+          : AdminDashboardPage(userRole: role, userName: userName));
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(_authError(e.code)), backgroundColor: Colors.red),
-      );
+      _showError(_authError(e.code));
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('로그인 실패: $e'), backgroundColor: Colors.red),
-      );
+      _showError('로그인 실패: $e');
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  // Firebase Auth 에러 코드 → 한글 메시지
+  void _go(Widget page) {
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => page),
+      (_) => false,
+    );
+  }
+
+  void _showError(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(msg), backgroundColor: Colors.red),
+    );
+  }
+
   String _authError(String code) {
     switch (code) {
       case 'user-not-found':
@@ -201,8 +182,6 @@ class _LoginPageState extends State<LoginPage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const SizedBox(height: 48),
-
-                    // 헤더
                     const Text('다시 만나서 반가워요!',
                         style: TextStyle(
                             fontSize: 24,
@@ -227,12 +206,9 @@ class _LoginPageState extends State<LoginPage> {
                         keyboardType: TextInputType.emailAddress,
                         textInputAction: TextInputAction.next,
                         enabled: !_isLoading,
-                        decoration: _inputDeco('example@email.com',
-                            Icons.email_outlined),
+                        decoration: _inputDeco('example@email.com', Icons.email_outlined),
                         validator: (v) {
-                          if (v == null || v.trim().isEmpty) {
-                            return '이메일을 입력해 주세요.';
-                          }
+                          if (v == null || v.trim().isEmpty) return '이메일을 입력해 주세요.';
                           if (!v.contains('@')) return '올바른 이메일 형식이 아닙니다.';
                           return null;
                         },
@@ -255,8 +231,10 @@ class _LoginPageState extends State<LoginPage> {
                         textInputAction: TextInputAction.done,
                         enabled: !_isLoading,
                         onFieldSubmitted: (_) => _login(),
-                        decoration: _inputDeco('비밀번호를 입력해 주세요.',
-                            Icons.lock_outline_rounded).copyWith(
+                        decoration: _inputDeco(
+                          '비밀번호를 입력해 주세요.',
+                          Icons.lock_outline_rounded,
+                        ).copyWith(
                           suffixIcon: Semantics(
                             label: _obscurePw ? '비밀번호 표시 버튼입니다.' : '비밀번호 숨기기 버튼입니다.',
                             child: IconButton(
@@ -277,7 +255,9 @@ class _LoginPageState extends State<LoginPage> {
                           if (v.length < 8) return '8자 이상 입력해 주세요.';
                           if (RegExp(r'[가-힣ㄱ-ㅎㅏ-ㅣ]').hasMatch(v)) return '한글은 사용할 수 없습니다.';
                           if (!RegExp(r'[A-Z]').hasMatch(v)) return '대문자를 1자 이상 포함해야 합니다.';
-                          if (!RegExp(r'[!@#\$%^&*()\-_=+\[\]{};:\'",.<>?/\\|`~]').hasMatch(v)) return '특수문자를 1자 이상 포함해야 합니다.';
+                          if (!RegExp(r'''[!@#\$%^&*()\-_=+\[\]{};:\'",.<>?/\\|`~]''').hasMatch(v)) {
+                            return '특수문자를 1자 이상 포함해야 합니다.';
+                          }
                           return null;
                         },
                       ),
@@ -301,11 +281,9 @@ class _LoginPageState extends State<LoginPage> {
                                 _blue.withValues(alpha: 0.6),
                           ),
                           onPressed: _isLoading ? null : _login,
-                          child: const Text(
-                            '로그인',
-                            style: TextStyle(
-                                fontSize: 18, fontWeight: FontWeight.w700),
-                          ),
+                          child: const Text('로그인',
+                              style: TextStyle(
+                                  fontSize: 18, fontWeight: FontWeight.w700)),
                         ),
                       ),
                     ),
@@ -317,12 +295,10 @@ class _LoginPageState extends State<LoginPage> {
           ),
         ),
 
-        // 로딩 오버레이 — 처리 중 입력·버튼 전체 차단
+        // 로딩 오버레이
         if (_isLoading) ...[
           const ModalBarrier(dismissible: false, color: Colors.black26),
-          const Center(
-            child: CircularProgressIndicator(color: _blue),
-          ),
+          const Center(child: CircularProgressIndicator(color: _blue)),
         ],
       ],
     );

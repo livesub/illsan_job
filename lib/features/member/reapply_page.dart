@@ -6,9 +6,10 @@ import '../../core/utils/auth_service.dart';
 import '../../core/utils/firestore_keys.dart';
 import '../login/login_intro_page.dart';
 
-// 졸업·중도탈락 학생 전용 재신청 화면 — 타 메뉴 없이 이 화면만 표시
+// 졸업·중도탈락 학생 전용 재신청 화면
+// 활성 강좌 선택 후 신청 시 status=pending, course_id 업데이트
 class ReapplyPage extends StatefulWidget {
-  final String status;    // FsUser.statusGraduated | statusDropped
+  final String status;   // FsUser.statusGraduated | statusDropped
   final String userName;
   const ReapplyPage({
     super.key,
@@ -21,12 +22,50 @@ class ReapplyPage extends StatefulWidget {
 }
 
 class _ReapplyPageState extends State<ReapplyPage> {
-  bool _isLoading = false;
+  bool _isLoading  = false;
+  bool _loadingCourses = true;
+
+  // 선택된 강좌 id
+  String? _selectedCourseId;
+  // 강좌 목록 {id: name}
+  final List<_CourseItem> _courses = [];
 
   bool get _isGraduated => widget.status == FsUser.statusGraduated;
 
-  // status → pending 업데이트 후 로그아웃 (관리자가 재승인)
+  @override
+  void initState() {
+    super.initState();
+    _loadCourses();
+  }
+
+  // Firestore courses 컬렉션에서 status=active 강좌 목록 조회
+  Future<void> _loadCourses() async {
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection(FsCol.courses)
+          .where(FsCourse.status, isEqualTo: FsCourse.statusActive)
+          .get();
+      if (!mounted) return;
+      _courses.clear();
+      for (final doc in snap.docs) {
+        final name = doc.data()[FsCourse.name] as String? ?? '';
+        if (name.isNotEmpty) {
+          _courses.add(_CourseItem(id: doc.id, name: name));
+        }
+      }
+    } finally {
+      if (mounted) setState(() => _loadingCourses = false);
+    }
+  }
+
+  // status=pending, course_id 업데이트 후 로그아웃
   Future<void> _reapply() async {
+    if (_selectedCourseId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('수강할 과정을 선택해 주세요.'), backgroundColor: Colors.red),
+      );
+      return;
+    }
     setState(() => _isLoading = true);
     try {
       final uid = FirebaseAuth.instance.currentUser?.uid;
@@ -34,7 +73,10 @@ class _ReapplyPageState extends State<ReapplyPage> {
         await FirebaseFirestore.instance
             .collection(FsCol.users)
             .doc(uid)
-            .update({FsUser.status: FsUser.statusPending});
+            .update({
+          FsUser.status:   FsUser.statusPending,
+          FsUser.courseId: _selectedCourseId,
+        });
       }
       AuthService.instance.clear();
       await FirebaseAuth.instance.signOut();
@@ -60,7 +102,9 @@ class _ReapplyPageState extends State<ReapplyPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return PopScope(
+      canPop: false,
+      child: Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
         backgroundColor: AppColors.primary,
@@ -84,68 +128,128 @@ class _ReapplyPageState extends State<ReapplyPage> {
         ],
       ),
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 32),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Semantics(
-                label: _isGraduated ? '졸업 상태 아이콘' : '중도탈락 상태 아이콘',
-                child: Icon(
-                  _isGraduated
-                      ? Icons.school_rounded
-                      : Icons.pause_circle_outline_rounded,
-                  size: 72,
-                  color: AppColors.primary,
-                ),
-              ),
-              const SizedBox(height: 24),
-              Semantics(
-                header: true,
-                child: Text(
-                  _isGraduated ? '수료 완료' : '수강 중단',
-                  style: const TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.textPrimary,
+        child: Stack(
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 32),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Semantics(
+                    label: _isGraduated ? '졸업 상태 아이콘' : '중도탈락 상태 아이콘',
+                    child: Icon(
+                      _isGraduated
+                          ? Icons.school_rounded
+                          : Icons.pause_circle_outline_rounded,
+                      size: 72,
+                      color: AppColors.primary,
+                    ),
                   ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              Text(
-                _isGraduated
-                    ? '${widget.userName}님의 과정이 완료되었습니다.\n재수강을 원하시면 아래 버튼을 눌러 주세요.'
-                    : '${widget.userName}님의 수강이 중단된 상태입니다.\n재신청을 원하시면 아래 버튼을 눌러 주세요.',
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  fontSize: 15,
-                  color: AppColors.textSecondary,
-                  height: 1.6,
-                ),
-              ),
-              const SizedBox(height: 48),
-              Semantics(
-                label: '재신청 버튼. 관리자에게 재신청 요청을 보냅니다.',
-                child: SizedBox(
-                  width: double.infinity,
-                  height: 56,
-                  child: ElevatedButton(
-                    onPressed: _isLoading ? null : _reapply,
-                    child: _isLoading
-                        ? const SizedBox(
-                            width: 24,
-                            height: 24,
-                            child: CircularProgressIndicator(
-                                color: Colors.white, strokeWidth: 2),
-                          )
-                        : const Text('재신청하기'),
+                  const SizedBox(height: 24),
+                  Semantics(
+                    header: true,
+                    child: Text(
+                      _isGraduated ? '수료 완료' : '수강 중단',
+                      style: const TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
                   ),
-                ),
+                  const SizedBox(height: 12),
+                  Text(
+                    _isGraduated
+                        ? '${widget.userName}님의 과정이 완료되었습니다.\n재수강을 원하시면 과정을 선택해 주세요.'
+                        : '${widget.userName}님의 수강이 중단된 상태입니다.\n재신청을 원하시면 과정을 선택해 주세요.',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 15,
+                      color: AppColors.textSecondary,
+                      height: 1.6,
+                    ),
+                  ),
+                  const SizedBox(height: 32),
+
+                  // 강좌 선택 드롭다운
+                  Semantics(
+                    label: '수강 과정 선택 드롭다운입니다.',
+                    child: _loadingCourses
+                        ? const CircularProgressIndicator()
+                        : _courses.isEmpty
+                            ? const Text(
+                                '현재 신청 가능한 과정이 없습니다.',
+                                style: TextStyle(
+                                    fontSize: 14,
+                                    color: AppColors.textSecondary),
+                              )
+                            : DropdownButtonFormField<String>(
+                                value: _selectedCourseId,
+                                isExpanded: true,
+                                decoration: InputDecoration(
+                                  labelText: '수강 과정 선택',
+                                  border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(14)),
+                                  enabledBorder: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(14),
+                                      borderSide: const BorderSide(
+                                          color: Color(0xFFE0E0E0))),
+                                  focusedBorder: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(14),
+                                      borderSide: const BorderSide(
+                                          color: AppColors.primary, width: 2)),
+                                  contentPadding: const EdgeInsets.symmetric(
+                                      horizontal: 16, vertical: 14),
+                                ),
+                                items: _courses
+                                    .map((c) => DropdownMenuItem(
+                                          value: c.id,
+                                          child: Text(c.name,
+                                              style: const TextStyle(
+                                                  fontSize: 14)),
+                                        ))
+                                    .toList(),
+                                onChanged: _isLoading
+                                    ? null
+                                    : (v) =>
+                                        setState(() => _selectedCourseId = v),
+                              ),
+                  ),
+                  const SizedBox(height: 32),
+
+                  // 재신청 버튼
+                  Semantics(
+                    label: '재신청 버튼. 선택한 과정으로 재신청 요청을 보냅니다.',
+                    child: SizedBox(
+                      width: double.infinity,
+                      height: 56,
+                      child: ElevatedButton(
+                        onPressed: (_isLoading || _loadingCourses || _courses.isEmpty)
+                            ? null
+                            : _reapply,
+                        child: _isLoading
+                            ? const SizedBox(
+                                width: 24,
+                                height: 24,
+                                child: CircularProgressIndicator(
+                                    color: Colors.white, strokeWidth: 2),
+                              )
+                            : const Text('재신청하기'),
+                      ),
+                    ),
+                  ),
+                ],
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
-    );
+    ));
   }
+}
+
+class _CourseItem {
+  final String id;
+  final String name;
+  const _CourseItem({required this.id, required this.name});
 }

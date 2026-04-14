@@ -95,10 +95,20 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
   List<_MenuItem> get _menuItems {
     return [
       _MenuItem(icon: Icons.dashboard_rounded, label: '관리 대시보드'),
-      _MenuItem(icon: Icons.people_alt_rounded, label: '회원 관리'),
+      
+      // 👇 이 부분이 변경되었습니다! 
+      // 최고 관리자(SUPER_ADMIN)로 로그인한 경우 '교사 관리'로 표시하고, 
+      // 교사(INSTRUCTOR)로 로그인한 경우에는 기존대로 '회원 관리'로 표시합니다.
+      _MenuItem(
+        icon: Icons.people_alt_rounded, 
+        label: widget.userRole == UserRole.SUPER_ADMIN ? '교사/학생 관리' : '학생 관리',
+      ),
+      
       if (widget.userRole == UserRole.SUPER_ADMIN)
         _MenuItem(icon: Icons.school_rounded, label: '강좌 관리'),
+      
       _MenuItem(icon: Icons.campaign_rounded, label: '공지사항 관리'),
+      
       // INSTRUCTOR 전용 — 구직 등록
       if (widget.userRole == UserRole.INSTRUCTOR)
         _MenuItem(icon: Icons.work_rounded, label: '구직 등록 관리'),

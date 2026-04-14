@@ -81,8 +81,8 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
     if (v.length < 8) return '8자 이상 입력해 주세요.';
     if (RegExp(r'[가-힣ㄱ-ㅎㅏ-ㅣ]').hasMatch(v)) return '한글은 사용할 수 없습니다.';
     if (!RegExp(r'[A-Z]').hasMatch(v)) return '대문자를 1자 이상 포함해야 합니다.';
-    if (!RegExp(r'[!@#\$%^&*()\-_=+\[\]{};:\'",.<>?/\\|`~]').hasMatch(v)) {
-      return '특수문자를 1자 이상 포함해야 합니다.';
+    if (!RegExp(r'''[!@#\$%^&*()\-_=+\[\]{};:\'",.<>?/\\|`~]''').hasMatch(v)) {
+        return '특수문자를 1자 이상 포함해야 합니다.';
     }
     return null;
   }
@@ -192,8 +192,8 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
                                 color: AppColors.textSecondary,
                                 size: 20,
                               ),
-                              onPressed: () => setState(
-                                  () => _obscureConfirm = !_obscureConfirm),
+                              onPressed: () =>
+                                  setState(() => _obscureConfirm = !_obscureConfirm),
                             ),
                           ),
                         ),

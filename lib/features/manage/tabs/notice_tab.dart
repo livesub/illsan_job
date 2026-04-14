@@ -7,12 +7,16 @@
 //   - 제목 검색 + 유형 필터는 클라이언트에서 처리
 //   - 페이징도 클라이언트에서 처리
 
+import 'dart:convert'; // 🌟 JSON 데이터 인코딩/디코딩용
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter_quill/flutter_quill.dart'; // 🌟 스마트 에디터용
+import 'package:http/http.dart' as http; // 🌟 푸시 알림 발송 통신용 패키지
+
 import '../../../core/enums/user_role.dart';
 import '../../../core/utils/firestore_keys.dart';
 
@@ -213,7 +217,7 @@ class _NoticeTabState extends State<NoticeTab> {
     if (confirmed != true || !mounted) return;
 
     try {
-      // 인라인 이미지 + 첨부파일 Storage Hard Delete
+      // 인라인 이미지 + 첨부파일 Storage Hard Delete (기존에 저장되어 있을 수 있는 파일들)
       final imgPaths    = (data[FsNotice.inlineImgs]  as List?)?.cast<String>() ?? [];
       final attachPaths = (data[FsNotice.attachments] as List?)?.cast<String>() ?? [];
       for (final path in [...imgPaths, ...attachPaths]) {
@@ -355,8 +359,10 @@ class _NoticeTabState extends State<NoticeTab> {
         label: Text(label),
         selected: isSelected,
         onSelected: (_) {
-          _typeFilter = value;
-          _resetFilter();
+          setState(() {
+            _typeFilter = value;
+            _resetFilter();
+          });
         },
         selectedColor: _blue,
         labelStyle: TextStyle(
@@ -520,7 +526,7 @@ class _NoticeTabState extends State<NoticeTab> {
 }
 
 // ─────────────────────────────────────────────────────────
-// 공지사항 등록/수정 다이얼로그
+// 공지사항 등록/수정 다이얼로그 (스마트 에디터 + 푸시 알림 발송 적용)
 // ─────────────────────────────────────────────────────────
 class _NoticeFormDialog extends StatefulWidget {
   final UserRole userRole;
@@ -540,9 +546,11 @@ class _NoticeFormDialog extends StatefulWidget {
 }
 
 class _NoticeFormDialogState extends State<_NoticeFormDialog> {
-  final _formKey    = GlobalKey<FormState>();
-  final _titleCtrl  = TextEditingController();
-  final _contentCtrl = TextEditingController();
+  final _formKey   = GlobalKey<FormState>();
+  final _titleCtrl = TextEditingController();
+
+  // 🌟 스마트 에디터 컨트롤러
+  late QuillController _quillController;
 
   // 공지 유형: 'all' | 'course'
   String _target = FsNotice.targetAll;
@@ -557,32 +565,29 @@ class _NoticeFormDialogState extends State<_NoticeFormDialog> {
 
   bool get _isEdit => widget.editDoc != null;
 
-  // 인라인 이미지 Storage 경로 + URL 목록
-  final List<String> _imgPaths = [];
-  final List<String> _imgUrls  = [];
-  bool _uploadingImg = false;
-
-  // 첨부파일 — 기존(수정 시) + 신규
+  /* 🌟 [차후 개발 보존] 첨부파일 및 이미지 변수 완전 주석 처리
   final List<String> _existAttachPaths   = [];
   final List<String> _existAttachNames   = [];
   final List<XFile>  _newAttachFiles     = [];
-  final List<String> _removedAttachPaths = []; // 수정 시 삭제 예약
-
+  final List<String> _removedAttachPaths = [];
   static const int   _maxAttach = 3;
-  static const int   _maxBytes  = 3 * 1024 * 1024; // 3MB
-  static const Color _blue      = Color(0xFF1565C0);
+  static const int   _maxBytes  = 3 * 1024 * 1024;
+  
+  final List<String> _imgPaths = [];
+  final List<String> _imgUrls  = [];
+  bool _uploadingImg = false;
+  */
+
+  static const Color _blue = Color(0xFF1565C0);
 
   @override
   void initState() {
     super.initState();
     _loadActiveCourses();
-    if (_isEdit) {
-      _prefillForm();
-      _loadInlineImages();
-      _loadExistAttachments();
-    }
+    _initFormAndEditor();
+    
     // INSTRUCTOR 기본: 담당 반 전체 공지
-    if (widget.userRole == UserRole.INSTRUCTOR) {
+    if (widget.userRole == UserRole.INSTRUCTOR && !_isEdit) {
       _target = FsNotice.targetCourseAll;
     }
   }
@@ -590,30 +595,52 @@ class _NoticeFormDialogState extends State<_NoticeFormDialog> {
   @override
   void dispose() {
     _titleCtrl.dispose();
-    _contentCtrl.dispose();
+    _quillController.dispose();
     super.dispose();
   }
 
-  void _prefillForm() {
-    final data = widget.editDoc!.data() as Map<String, dynamic>;
-    _titleCtrl.text   = data[FsNotice.title]   as String? ?? '';
-    _contentCtrl.text = data[FsNotice.content] as String? ?? '';
-    _target = data[FsNotice.target] as String? ?? FsNotice.targetAll;
-    _selectedCourseId   = data[FsNotice.courseId] as String?;
+  // 🌟 핵심 로직: 기존 데이터를 불러와 폼과 에디터에 채웁니다.
+  void _initFormAndEditor() {
+    Document doc = Document(); // 빈 문서 생성
+
+    if (_isEdit) {
+      final data = widget.editDoc!.data() as Map<String, dynamic>;
+      _titleCtrl.text = data[FsNotice.title] as String? ?? '';
+      _target = data[FsNotice.target] as String? ?? FsNotice.targetAll;
+      _selectedCourseId = data[FsNotice.courseId] as String?;
+
+      // 공지 내용 불러오기 (JSON Delta 또는 일반 텍스트 호환)
+      final content = data[FsNotice.content] as String? ?? '';
+      if (content.isNotEmpty) {
+        try {
+          final decoded = jsonDecode(content);
+          doc = Document.fromJson(decoded);
+        } catch (e) {
+          doc.insert(0, content);
+        }
+      }
+    }
+
+    // 컨트롤러 초기화
+    _quillController = QuillController(
+      document: doc,
+      selection: const TextSelection.collapsed(offset: 0),
+    );
   }
 
-  // 활성 강좌 목록을 Firestore에서 가져옵니다.
+  // 활성 강좌 목록 로드
   Future<void> _loadActiveCourses() async {
     try {
       Query query = FirebaseFirestore.instance
           .collection(FsCol.courses)
           .where(FsCourse.status, isEqualTo: FsCourse.statusActive);
-      // INSTRUCTOR는 본인 담당 강좌만 표시합니다.
+          
       if (widget.userRole == UserRole.INSTRUCTOR) {
         query = query.where(FsCourse.teacherId, isEqualTo: widget.authorUid);
       }
       final snap = await query.orderBy(FsCourse.name).get();
       if (!mounted) return;
+      
       final courses = snap.docs.map((d) {
         final data = d.data() as Map<String, dynamic>;
         return {
@@ -621,10 +648,10 @@ class _NoticeFormDialogState extends State<_NoticeFormDialog> {
           'name': data[FsCourse.name] as String? ?? '강좌명 없음',
         };
       }).toList();
+
       setState(() {
         _activeCourses = courses;
         _loadingCourses = false;
-        // 수정 모드에서 강좌명 복원
         if (_selectedCourseId != null) {
           final match = courses.where((c) => c['id'] == _selectedCourseId);
           _selectedCourseName = match.isNotEmpty ? match.first['name'] : null;
@@ -636,144 +663,69 @@ class _NoticeFormDialogState extends State<_NoticeFormDialog> {
     }
   }
 
-  // 수정 모드: 기존 인라인 이미지 URL을 Storage에서 로드합니다.
-  Future<void> _loadInlineImages() async {
-    final data = widget.editDoc!.data() as Map<String, dynamic>;
-    final paths = (data[FsNotice.inlineImgs] as List?)?.cast<String>() ?? [];
-    for (final path in paths) {
-      try {
-        final url = await FirebaseStorage.instance.ref(path).getDownloadURL();
-        if (!mounted) return;
-        setState(() {
-          _imgPaths.add(path);
-          _imgUrls.add(url);
-        });
-      } catch (_) {}
-    }
-  }
-
-  Future<void> _pickAndUploadImage() async {
-    final picker = ImagePicker();
-    final picked = await picker.pickImage(
-      source: ImageSource.gallery,
-      maxWidth: 1024,
-      maxHeight: 1024,
-      imageQuality: 80,
-    );
-    if (picked == null || !mounted) return;
-    setState(() => _uploadingImg = true);
+  // 🌟 [핵심 추가] 푸시 알림 발송 로직 (앱에서 직접 FCM 발송)
+  Future<void> _sendPushNotification(String noticeTitle) async {
     try {
-      final bytes = await picked.readAsBytes();
-      final now = DateTime.now();
-      final path =
-          '${StoragePath.inlinePath(StoragePath.boardNotice, now.year, now.month)}'
-          '${now.millisecondsSinceEpoch}_${picked.name}';
-      final ref = FirebaseStorage.instance.ref(path);
-      await ref.putData(bytes, SettableMetadata(contentType: 'image/jpeg'));
-      final url = await ref.getDownloadURL();
-      if (!mounted) return;
-      setState(() {
-        _imgPaths.add(path);
-        _imgUrls.add(url);
-      });
+      // 1. 선택된 대상(target)에 따라 필터링 쿼리를 만듭니다.
+      Query query = FirebaseFirestore.instance.collection(FsCol.users);
+
+      if (_target == FsNotice.targetTeachers) {
+        query = query.where(FsUser.role, isEqualTo: FsUser.roleInstructor);
+      } else if (_target == FsNotice.targetStudents) {
+        query = query.where(FsUser.role, isEqualTo: FsUser.roleStudent);
+      } else if (_target == FsNotice.targetCourse) {
+        query = query.where(FsUser.courseId, isEqualTo: _selectedCourseId);
+      }
+      // targetAll 이나 targetCourseAll인 경우는 조건에 맞춰 전체를 조회합니다.
+
+      // 2. 쿼리를 실행하여 대상자들의 데이터를 가져옵니다.
+      final snap = await query.get();
+      List<String> tokens = [];
+
+      for (var doc in snap.docs) {
+        final data = doc.data() as Map<String, dynamic>;
+        // ⚠️ 주의: 실제 DB에 저장되는 FCM 토큰 필드명으로 변경해 주세요. (예: fcmToken, fcm_token 등)
+        final token = data['fcmToken'] as String?;
+        if (token != null && token.isNotEmpty) {
+          tokens.add(token);
+        }
+      }
+
+      if (tokens.isEmpty) {
+        print('푸시 발송 건너뜀: 알림을 받을 대상자의 토큰이 없습니다.');
+        return; 
+      }
+
+      // 3. 수집된 토큰들로 푸시 알림 발송 (FCM API 호출)
+      // ⚠️ 주의: 실제 발송 시에는 아래 URL과 Bearer 토큰을 개발자님의 서버 환경(또는 서버 키)에 맞게 설정해야 합니다.
+      final url = Uri.parse('https://fcm.googleapis.com/v1/projects/YOUR_PROJECT_ID/messages:send');
+      final headers = {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer 여기에_서버_액세스_토큰_입력',
+      };
+
+      for (String token in tokens) {
+        final payload = {
+          'message': {
+            'token': token,
+            'notification': {
+              'title': '새 공지사항: $noticeTitle',
+              'body': 'Job 알리미에 새로운 공지사항이 등록되었습니다. 확인해 보세요!',
+            },
+          }
+        };
+
+        // http.post로 구글 FCM 서버에 전송을 요청합니다.
+        await http.post(
+          url,
+          headers: headers,
+          body: jsonEncode(payload),
+        );
+      }
+      print('푸시 알림 발송 완료: 총 ${tokens.length}명에게 발송됨.');
     } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('이미지 업로드 실패: $e'), backgroundColor: Colors.red),
-      );
-    } finally {
-      if (mounted) setState(() => _uploadingImg = false);
+      print('푸시 알림 발송 중 에러 발생: $e');
     }
-  }
-
-  Future<void> _removeImage(int index) async {
-    final path = _imgPaths[index];
-    try { await FirebaseStorage.instance.ref(path).delete(); } catch (_) {}
-    if (!mounted) return;
-    setState(() {
-      _imgPaths.removeAt(index);
-      _imgUrls.removeAt(index);
-    });
-  }
-
-  void _loadExistAttachments() {
-    final data  = widget.editDoc!.data() as Map<String, dynamic>;
-    final paths = (data[FsNotice.attachments] as List?)?.cast<String>() ?? [];
-    for (final p in paths) {
-      _existAttachPaths.add(p);
-      _existAttachNames.add(p.split('/').last);
-    }
-  }
-
-  // file_picker size 속성 사용 — dart:io File 금지 (웹 크래시 방지)
-  Future<void> _pickAttachment() async {
-    final total = _existAttachPaths.length + _newAttachFiles.length;
-    if (total >= _maxAttach) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text('첨부파일은 최대 3개까지 가능합니다.'),
-            backgroundColor: Colors.orange),
-      );
-      return;
-    }
-    final result = await FilePicker.platform.pickFiles(
-      allowMultiple: false,
-      withData: false,
-    );
-    if (result == null || result.files.isEmpty || !mounted) return;
-
-    final pf   = result.files.first;
-    final size = pf.size; // file_picker 제공 size (웹/모바일 공통)
-
-    if (size > _maxBytes) {
-      if (!mounted) return;
-      showDialog<void>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-          title: const Row(children: [
-            Icon(Icons.warning_rounded, color: Colors.orange, size: 22),
-            SizedBox(width: 8),
-            Text('용량 초과', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
-          ]),
-          content: const Text('파일 용량은 3MB를 초과할 수 없습니다.'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('확인'),
-            ),
-          ],
-        ),
-      );
-      return;
-    }
-    setState(() => _newAttachFiles.add(XFile(pf.path ?? '', name: pf.name)));
-  }
-
-  void _removeExistAttach(int index) {
-    setState(() {
-      _removedAttachPaths.add(_existAttachPaths[index]);
-      _existAttachPaths.removeAt(index);
-      _existAttachNames.removeAt(index);
-    });
-  }
-
-  void _removeNewAttach(int index) {
-    setState(() => _newAttachFiles.removeAt(index));
-  }
-
-  void _wrapSelection(String open, String close) {
-    final sel  = _contentCtrl.selection;
-    if (!sel.isValid) return;
-    final text = _contentCtrl.text;
-    final before   = text.substring(0, sel.start);
-    final selected = text.substring(sel.start, sel.end);
-    final after    = text.substring(sel.end);
-    _contentCtrl.value = TextEditingValue(
-      text: '$before$open$selected$close$after',
-      selection: TextSelection.collapsed(
-          offset: sel.start + open.length + selected.length + close.length),
-    );
   }
 
   Future<void> _save() async {
@@ -786,31 +738,16 @@ class _NoticeFormDialogState extends State<_NoticeFormDialog> {
     setState(() => _saving = true);
 
     try {
-      final now = DateTime.now();
-
-      // 신규 첨부파일 Storage 업로드
-      final uploadedPaths = List<String>.from(_existAttachPaths);
-      for (final xf in _newAttachFiles) {
-        final bytes = await xf.readAsBytes();
-        final path =
-            '${StoragePath.attachmentPath(StoragePath.boardNotice, now.year, now.month)}'
-            '${now.millisecondsSinceEpoch}_${xf.name}';
-        await FirebaseStorage.instance.ref(path).putData(bytes);
-        uploadedPaths.add(path);
-      }
-
-      // 수정 시 제거된 파일 Hard Delete
-      for (final path in _removedAttachPaths) {
-        try { await FirebaseStorage.instance.ref(path).delete(); } catch (_) {}
-      }
+      // 🌟 에디터 내용을 JSON Delta 문자열로 변환
+      final contentJson = jsonEncode(_quillController.document.toDelta().toJson());
 
       final payload = <String, dynamic>{
         FsNotice.title:       _titleCtrl.text.trim(),
-        FsNotice.content:     _contentCtrl.text.trim(),
+        FsNotice.content:     contentJson, 
         FsNotice.target:      _target,
         FsNotice.courseId:    _target == FsNotice.targetCourse ? _selectedCourseId : null,
-        FsNotice.inlineImgs:  _imgPaths,
-        FsNotice.attachments: uploadedPaths,
+        FsNotice.inlineImgs:  [], 
+        FsNotice.attachments: [], 
       };
 
       if (_isEdit) {
@@ -826,12 +763,23 @@ class _NoticeFormDialogState extends State<_NoticeFormDialog> {
           FsNotice.isDeleted:  false,
           FsNotice.createdAt:  StoragePath.nowCreatedAt(),
         });
+
+        // 🌟 [푸시 알림 발송] 공지 신규 등록이 성공적으로 완료되면 백그라운드에서 푸시를 발송합니다.
+        // 수정(_isEdit)일 때는 알림이 가지 않도록 새 글 등록일 때만 호출합니다.
+        _sendPushNotification(_titleCtrl.text.trim());
       }
       if (!mounted) return;
-      Navigator.of(context).pop(true);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(_isEdit ? '공지가 수정되었습니다.' : '공지가 등록되었습니다.'),
-          backgroundColor: const Color(0xFF00897B)));
+
+      // 🌟 마우스 트래커 에러 방지용 포커스 해제
+      FocusManager.instance.primaryFocus?.unfocus();
+      Future.delayed(const Duration(milliseconds: 50), () {
+        if (!mounted) return;
+        Navigator.of(context).pop(true);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(_isEdit ? '공지가 수정되었습니다.' : '공지가 등록되었습니다.'),
+            backgroundColor: const Color(0xFF00897B)));
+      });
+      
     } catch (e) {
       if (!mounted) return;
       setState(() => _saving = false);
@@ -868,7 +816,13 @@ class _NoticeFormDialogState extends State<_NoticeFormDialog> {
                           fontWeight: FontWeight.w700))),
               IconButton(
                 icon: const Icon(Icons.close_rounded, color: Colors.white70),
-                onPressed: _saving ? null : () => Navigator.of(context).pop(false),
+                onPressed: () {
+                  // 닫기 버튼 누를 때도 포커스 해제
+                  FocusManager.instance.primaryFocus?.unfocus();
+                  Future.delayed(const Duration(milliseconds: 50), () {
+                    if (mounted) Navigator.pop(context);
+                  });
+                },
                 padding: EdgeInsets.zero,
                 constraints: const BoxConstraints(),
               ),
@@ -897,7 +851,7 @@ class _NoticeFormDialogState extends State<_NoticeFormDialog> {
                     ),
                     const SizedBox(height: 20),
 
-                    // 2. 공지 유형 (SUPER_ADMIN만 전체 공지 선택 가능)
+                    // 2. 공지 유형
                     _buildLabel('공지 유형', required: true),
                     const SizedBox(height: 6),
                     _buildTargetSelector(),
@@ -911,21 +865,10 @@ class _NoticeFormDialogState extends State<_NoticeFormDialog> {
                       const SizedBox(height: 20),
                     ],
 
-                    // 4. 내용 — 스마트 에디터
+                    // 4. 내용 — 스마트 에디터 영역
                     _buildLabel('내용', required: true),
                     const SizedBox(height: 6),
-                    _buildSmartEditor(),
-                    const SizedBox(height: 20),
-
-                    // 5. 첨부파일 (숨김)
-                    if (false) ...[
-                      _buildLabel('첨부파일'),
-                      const SizedBox(height: 4),
-                      const Text('최대 3개 · 각 3MB 이하',
-                          style: TextStyle(fontSize: 11, color: Color(0xFF9E9E9E))),
-                      const SizedBox(height: 8),
-                      _buildAttachSection(),
-                    ],
+                    _buildQuillEditor(),
                     const SizedBox(height: 28),
 
                     // 저장 버튼
@@ -964,76 +907,112 @@ class _NoticeFormDialogState extends State<_NoticeFormDialog> {
     );
   }
 
-  // 공지 대상 선택 (역할별 분기)
+  // 🌟 스마트 에디터 UI 구성 (이미지 버튼 완전 주석 처리, 툴바 분리 방식 적용)
+  Widget _buildQuillEditor() {
+    return Container(
+      decoration: BoxDecoration(
+        border: Border.all(color: Colors.grey.shade300), 
+        borderRadius: BorderRadius.circular(8)
+      ),
+      child: Column(
+        children: [
+          // 1. 툴바 영역 (v11.5.0 방식에 맞춰 가로 스크롤 이슈 방지를 위해 Expanded 감쌈)
+          Row(
+            children: [
+              // 기본 툴바 (왼쪽 차지)
+              Expanded(
+                child: QuillSimpleToolbar(
+                  controller: _quillController,
+                ),
+              ),
+              
+              /* 🌟 [차후 개발 보존] 커스텀 이미지 버튼 완전 주석 처리 (스크린샷 요청 적용)
+              Container(
+                decoration: BoxDecoration(
+                  border: Border(left: BorderSide(color: Colors.grey.shade300))
+                ),
+                child: IconButton(
+                  icon: const Icon(Icons.image_rounded, color: _blue),
+                  tooltip: '이미지 첨부',
+                  onPressed: () {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('이미지 저장은 차후 개발에 적용 됩니다.'),
+                        backgroundColor: Colors.orange,
+                      ),
+                    );
+                  },
+                ),
+              ),
+              */
+            ],
+          ),
+          const Divider(height: 1, thickness: 1),
+          // 2. 입력창 영역
+          Container(
+            height: 300,
+            padding: const EdgeInsets.all(12),
+            child: QuillEditor.basic(
+              controller: _quillController,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildTargetSelector() {
-    // INSTRUCTOR: 담당 반 전체 / 특정 반
     if (widget.userRole == UserRole.INSTRUCTOR) {
       return Row(children: [
         Expanded(
-          child: Semantics(
-            label: '담당 반 전체 선택 버튼입니다.',
-            child: _TargetChip(
-              label: '담당 반 전체',
-              icon: Icons.groups_rounded,
-              selected: _target == FsNotice.targetCourseAll,
-              enabled: true,
-              onTap: () => setState(() => _target = FsNotice.targetCourseAll),
-            ),
+          child: _TargetChip(
+            label: '담당 반 전체',
+            icon: Icons.groups_rounded,
+            selected: _target == FsNotice.targetCourseAll,
+            enabled: true,
+            onTap: () => setState(() => _target = FsNotice.targetCourseAll),
           ),
         ),
         const SizedBox(width: 12),
         Expanded(
-          child: Semantics(
-            label: '특정 반 선택 버튼입니다.',
-            child: _TargetChip(
-              label: '특정 반',
-              icon: Icons.school_rounded,
-              selected: _target == FsNotice.targetCourse,
-              enabled: true,
-              onTap: () => setState(() => _target = FsNotice.targetCourse),
-            ),
+          child: _TargetChip(
+            label: '특정 반',
+            icon: Icons.school_rounded,
+            selected: _target == FsNotice.targetCourse,
+            enabled: true,
+            onTap: () => setState(() => _target = FsNotice.targetCourse),
           ),
         ),
       ]);
     }
-    // SUPER_ADMIN: 전체(교사+학생) / 전체 교사 / 전체 학생
     return Row(children: [
       Expanded(
-        child: Semantics(
-          label: '전체 대상 공지 선택 버튼입니다.',
-          child: _TargetChip(
-            label: '전체',
-            icon: Icons.public_rounded,
-            selected: _target == FsNotice.targetAll,
-            enabled: true,
-            onTap: () => setState(() => _target = FsNotice.targetAll),
-          ),
+        child: _TargetChip(
+          label: '전체',
+          icon: Icons.public_rounded,
+          selected: _target == FsNotice.targetAll,
+          enabled: true,
+          onTap: () => setState(() => _target = FsNotice.targetAll),
         ),
       ),
       const SizedBox(width: 8),
       Expanded(
-        child: Semantics(
-          label: '전체 교사 대상 선택 버튼입니다.',
-          child: _TargetChip(
-            label: '전체 교사',
-            icon: Icons.person_rounded,
-            selected: _target == FsNotice.targetTeachers,
-            enabled: true,
-            onTap: () => setState(() => _target = FsNotice.targetTeachers),
-          ),
+        child: _TargetChip(
+          label: '전체 교사',
+          icon: Icons.person_rounded,
+          selected: _target == FsNotice.targetTeachers,
+          enabled: true,
+          onTap: () => setState(() => _target = FsNotice.targetTeachers),
         ),
       ),
       const SizedBox(width: 8),
       Expanded(
-        child: Semantics(
-          label: '전체 학생 대상 선택 버튼입니다.',
-          child: _TargetChip(
-            label: '전체 학생',
-            icon: Icons.school_rounded,
-            selected: _target == FsNotice.targetStudents,
-            enabled: true,
-            onTap: () => setState(() => _target = FsNotice.targetStudents),
-          ),
+        child: _TargetChip(
+          label: '전체 학생',
+          icon: Icons.school_rounded,
+          selected: _target == FsNotice.targetStudents,
+          enabled: true,
+          onTap: () => setState(() => _target = FsNotice.targetStudents),
         ),
       ),
     ]);
@@ -1051,13 +1030,9 @@ class _NoticeFormDialogState extends State<_NoticeFormDialog> {
           color: Colors.white,
         ),
         child: const Row(children: [
-          SizedBox(
-              width: 16,
-              height: 16,
-              child: CircularProgressIndicator(strokeWidth: 2)),
+          SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
           SizedBox(width: 10),
-          Text('강좌 목록 불러오는 중...',
-              style: TextStyle(color: Color(0xFF9E9E9E), fontSize: 13)),
+          Text('강좌 목록 불러오는 중...', style: TextStyle(color: Color(0xFF9E9E9E), fontSize: 13)),
         ]),
       );
     }
@@ -1071,412 +1046,24 @@ class _NoticeFormDialogState extends State<_NoticeFormDialog> {
           borderRadius: BorderRadius.circular(10),
           color: Colors.red.shade50,
         ),
-        child: const Text('활성 강좌가 없습니다.',
-            style: TextStyle(color: Colors.red, fontSize: 13)),
+        child: const Text('활성 강좌가 없습니다.', style: TextStyle(color: Colors.red, fontSize: 13)),
       );
     }
-    return Semantics(
-      label: '대상 강좌 선택 드롭다운입니다. 필수 항목입니다.',
-      child: DropdownButtonFormField<String>(
-        // ignore: deprecated_member_use
-        value: _selectedCourseId,
-        isExpanded: true,
-        decoration: _inputDeco('강좌를 선택해 주세요.'),
-        items: _activeCourses
-            .map((c) => DropdownMenuItem<String>(
-                  value: c['id'],
-                  child: Text(c['name']!, style: const TextStyle(fontSize: 14)),
-                ))
-            .toList(),
-        onChanged: (id) => setState(() {
-          _selectedCourseId   = id;
-          _selectedCourseName = _activeCourses
-              .firstWhere((c) => c['id'] == id)['name'];
-        }),
-        validator: (v) => v == null ? '강좌를 선택해 주세요.' : null,
-      ),
-    );
-  }
-
-  // 서식 툴바 + 내용 입력 + 인라인 이미지 섹션
-  Widget _buildSmartEditor() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          decoration: BoxDecoration(
-            color: const Color(0xFFF5F5F5),
-            border: Border.all(color: const Color(0xFFE0E0E0)),
-            borderRadius: const BorderRadius.only(
-              topLeft: Radius.circular(10),
-              topRight: Radius.circular(10),
-            ),
-          ),
-          child: Row(children: [
-            Semantics(
-              label: '굵게 서식 버튼입니다.',
-              child: IconButton(
-                icon: const Icon(Icons.format_bold_rounded, size: 20),
-                onPressed: () => _wrapSelection('<b>', '</b>'),
-                tooltip: '굵게',
-                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                padding: EdgeInsets.zero,
-              ),
-            ),
-            Semantics(
-              label: '기울임 서식 버튼입니다.',
-              child: IconButton(
-                icon: const Icon(Icons.format_italic_rounded, size: 20),
-                onPressed: () => _wrapSelection('<i>', '</i>'),
-                tooltip: '기울임',
-                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                padding: EdgeInsets.zero,
-              ),
-            ),
-            Semantics(
-              label: '밑줄 서식 버튼입니다.',
-              child: IconButton(
-                icon: const Icon(Icons.format_underline_rounded, size: 20),
-                onPressed: () => _wrapSelection('<u>', '</u>'),
-                tooltip: '밑줄',
-                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                padding: EdgeInsets.zero,
-              ),
-            ),
-            Semantics(
-              label: '텍스트 색상 선택 버튼입니다.',
-              child: PopupMenuButton<String>(
-                tooltip: '텍스트 색상',
-                offset: const Offset(0, 36),
-                icon: const Icon(Icons.format_color_text_rounded, size: 20),
-                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                padding: EdgeInsets.zero,
-                onSelected: (hex) =>
-                    _wrapSelection('<font color="$hex">', '</font>'),
-                itemBuilder: (_) {
-                  final items = [
-                    ('빨강', '#D32F2F', const Color(0xFFD32F2F)),
-                    ('파랑', '#1565C0', const Color(0xFF1565C0)),
-                    ('초록', '#2E7D32', const Color(0xFF2E7D32)),
-                    ('주황', '#E65100', const Color(0xFFE65100)),
-                    ('보라', '#6A1B9A', const Color(0xFF6A1B9A)),
-                    ('검정', '#212121', const Color(0xFF212121)),
-                  ];
-                  return items
-                      .map((c) => PopupMenuItem<String>(
-                            value: c.$2,
-                            child: Row(children: [
-                              Container(
-                                width: 16,
-                                height: 16,
-                                decoration: BoxDecoration(
-                                    color: c.$3,
-                                    borderRadius: BorderRadius.circular(3)),
-                              ),
-                              const SizedBox(width: 8),
-                              Text(c.$1,
-                                  style: const TextStyle(fontSize: 13)),
-                            ]),
-                          ))
-                      .toList();
-                },
-              ),
-            ),
-            const VerticalDivider(
-                width: 16, thickness: 1, color: Color(0xFFE0E0E0)),
-            Semantics(
-              label: '이미지 추가 버튼입니다.',
-              child: _uploadingImg
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2))
-                  : IconButton(
-                      icon: const Icon(Icons.image_rounded,
-                          size: 20, color: _blue),
-                      onPressed: _pickAndUploadImage,
-                      tooltip: '이미지 추가',
-                      constraints:
-                          const BoxConstraints(minWidth: 36, minHeight: 36),
-                      padding: EdgeInsets.zero,
-                    ),
-            ),
-          ]),
-        ),
-        Semantics(
-          label: '공지 내용 입력란입니다. 필수 항목입니다.',
-          child: TextFormField(
-            controller: _contentCtrl,
-            maxLines: 8,
-            decoration: InputDecoration(
-              hintText: '공지 내용을 입력하세요.\n서식 버튼으로 굵게·기울임·밑줄을 적용할 수 있습니다.',
-              hintStyle:
-                  const TextStyle(color: Color(0xFFBDBDBD), fontSize: 13),
-              filled: true,
-              fillColor: Colors.white,
-              border: const OutlineInputBorder(
-                borderRadius: BorderRadius.only(
-                    bottomLeft: Radius.circular(10),
-                    bottomRight: Radius.circular(10)),
-                borderSide: BorderSide(color: Color(0xFFE0E0E0)),
-              ),
-              enabledBorder: const OutlineInputBorder(
-                borderRadius: BorderRadius.only(
-                    bottomLeft: Radius.circular(10),
-                    bottomRight: Radius.circular(10)),
-                borderSide: BorderSide(color: Color(0xFFE0E0E0)),
-              ),
-              focusedBorder: const OutlineInputBorder(
-                borderRadius: BorderRadius.only(
-                    bottomLeft: Radius.circular(10),
-                    bottomRight: Radius.circular(10)),
-                borderSide: BorderSide(color: _blue, width: 2),
-              ),
-              errorBorder: const OutlineInputBorder(
-                borderRadius: BorderRadius.only(
-                    bottomLeft: Radius.circular(10),
-                    bottomRight: Radius.circular(10)),
-                borderSide: BorderSide(color: Colors.red),
-              ),
-              contentPadding: const EdgeInsets.all(14),
-            ),
-            validator: (v) =>
-                (v == null || v.trim().isEmpty) ? '내용을 입력해 주세요.' : null,
-          ),
-        ),
-        // 미리보기 영역
-        const SizedBox(height: 12),
-        Row(children: const [
-          Icon(Icons.preview_rounded, size: 14, color: Color(0xFF757575)),
-          SizedBox(width: 4),
-          Text('미리보기',
-              style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: Color(0xFF757575))),
-        ]),
-        const SizedBox(height: 4),
-        ValueListenableBuilder<TextEditingValue>(
-          valueListenable: _contentCtrl,
-          builder: (_, val, __) => _buildPreviewBox(val.text),
-        ),
-        if (_imgPaths.isNotEmpty) ...[
-          const SizedBox(height: 12),
-          const Text('첨부 이미지',
-              style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: Color(0xFF424242))),
-          const SizedBox(height: 6),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: List.generate(_imgPaths.length, (i) {
-              return Stack(children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: Image.network(
-                    _imgUrls[i],
-                    width: 80,
-                    height: 80,
-                    fit: BoxFit.cover,
-                    loadingBuilder: (_, child, progress) =>
-                        progress == null
-                            ? child
-                            : const SizedBox(
-                                width: 80,
-                                height: 80,
-                                child: Center(
-                                    child: CircularProgressIndicator(
-                                        strokeWidth: 2))),
-                    errorBuilder: (_, __, ___) => const SizedBox(
-                        width: 80,
-                        height: 80,
-                        child: Icon(Icons.broken_image_rounded,
-                            color: Colors.grey)),
-                  ),
-                ),
-                Positioned(
-                  top: 2,
-                  right: 2,
-                  child: Semantics(
-                    label: '이미지 삭제 버튼입니다.',
-                    child: GestureDetector(
-                      onTap: () => _removeImage(i),
-                      child: Container(
-                        decoration: const BoxDecoration(
-                            color: Colors.red, shape: BoxShape.circle),
-                        padding: const EdgeInsets.all(2),
-                        child: const Icon(Icons.close_rounded,
-                            size: 14, color: Colors.white),
-                      ),
-                    ),
-                  ),
-                ),
-              ]);
-            }),
-          ),
-        ],
-      ],
-    );
-  }
-
-  Widget _buildPreviewBox(String text) {
-    return Container(
-      width: double.infinity,
-      constraints: const BoxConstraints(minHeight: 60),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: const Color(0xFFE0E0E0)),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: text.trim().isEmpty
-          ? const Text('내용을 입력하면 미리보기가 표시됩니다.',
-              style: TextStyle(color: Color(0xFFBDBDBD), fontSize: 13))
-          : RichText(
-              text: TextSpan(
-                style: const TextStyle(
-                    color: Color(0xFF1A1A2E), fontSize: 14, height: 1.6),
-                children: _parseHtmlSpans(text),
-              ),
-            ),
-    );
-  }
-
-  // `<b>`, `<i>`, `<u>`, `<font color>` 태그를 파싱해 InlineSpan 목록으로 변환
-  List<InlineSpan> _parseHtmlSpans(String html) {
-    final spans = <InlineSpan>[];
-    final tagRe = RegExp(r'<(/?)(\w+)([^>]*)>', caseSensitive: false);
-    int boldDepth = 0, italicDepth = 0, underlineDepth = 0;
-    final colorStack = <Color?>[];
-
-    void addText(String text) {
-      if (text.isEmpty) return;
-      spans.add(TextSpan(
-        text: text,
-        style: TextStyle(
-          fontWeight: boldDepth > 0 ? FontWeight.bold : FontWeight.normal,
-          fontStyle: italicDepth > 0 ? FontStyle.italic : FontStyle.normal,
-          decoration:
-              underlineDepth > 0 ? TextDecoration.underline : TextDecoration.none,
-          color: colorStack.isNotEmpty ? colorStack.last : null,
-        ),
-      ));
-    }
-
-    int pos = 0;
-    for (final m in tagRe.allMatches(html)) {
-      addText(html.substring(pos, m.start));
-      pos = m.end;
-      final closing = m.group(1) == '/';
-      final tag = m.group(2)!.toLowerCase();
-      final attrs = m.group(3) ?? '';
-      if (!closing) {
-        switch (tag) {
-          case 'b':
-            boldDepth++;
-          case 'i':
-            italicDepth++;
-          case 'u':
-            underlineDepth++;
-          case 'font':
-            final cm =
-                RegExp(r'color="([^"]+)"', caseSensitive: false).firstMatch(attrs);
-            if (cm != null) {
-              final hex = cm.group(1)!.replaceAll('#', '');
-              try {
-                colorStack.add(Color(int.parse('FF$hex', radix: 16)));
-              } catch (_) {
-                colorStack.add(null);
-              }
-            } else {
-              colorStack.add(null);
-            }
-        }
-      } else {
-        switch (tag) {
-          case 'b':
-            if (boldDepth > 0) boldDepth--;
-          case 'i':
-            if (italicDepth > 0) italicDepth--;
-          case 'u':
-            if (underlineDepth > 0) underlineDepth--;
-          case 'font':
-            if (colorStack.isNotEmpty) colorStack.removeLast();
-        }
-      }
-    }
-    addText(html.substring(pos));
-    return spans;
-  }
-
-  Widget _buildAttachSection() {
-    final totalCount = _existAttachPaths.length + _newAttachFiles.length;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        ..._existAttachPaths.asMap().entries.map((e) => _buildAttachTile(
-              name: _existAttachNames[e.key],
-              onRemove: () => _removeExistAttach(e.key),
-              isNew: false,
-            )),
-        ..._newAttachFiles.asMap().entries.map((e) => _buildAttachTile(
-              name: e.value.name,
-              onRemove: () => _removeNewAttach(e.key),
-              isNew: true,
-            )),
-        if (totalCount < _maxAttach)
-          Semantics(
-            label: '첨부파일 추가 버튼입니다.',
-            child: OutlinedButton.icon(
-              style: OutlinedButton.styleFrom(
-                foregroundColor: _blue,
-                side: const BorderSide(color: _blue),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8)),
-                minimumSize: Size.zero,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              ),
-              onPressed: _pickAttachment,
-              icon: const Icon(Icons.attach_file_rounded, size: 16),
-              label: Text('파일 추가 ($totalCount/$_maxAttach)',
-                  style: const TextStyle(fontSize: 13)),
-            ),
-          ),
-      ],
-    );
-  }
-
-  Widget _buildAttachTile(
-      {required String name,
-      required VoidCallback onRemove,
-      required bool isNew}) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
-      child: Row(children: [
-        const Icon(Icons.insert_drive_file_rounded,
-            size: 16, color: Color(0xFF757575)),
-        const SizedBox(width: 6),
-        Expanded(
-            child: Text(name,
-                style: const TextStyle(fontSize: 12),
-                overflow: TextOverflow.ellipsis)),
-        if (isNew)
-          const Text('신규',
-              style: TextStyle(fontSize: 10, color: Color(0xFF00897B))),
-        const SizedBox(width: 4),
-        Semantics(
-          label: '$name 첨부파일 삭제 버튼입니다.',
-          child: GestureDetector(
-            onTap: onRemove,
-            child: const Icon(Icons.close_rounded,
-                size: 16, color: Color(0xFFD32F2F)),
-          ),
-        ),
-      ]),
+    return DropdownButtonFormField<String>(
+      value: _selectedCourseId,
+      isExpanded: true,
+      decoration: _inputDeco('강좌를 선택해 주세요.'),
+      items: _activeCourses
+          .map((c) => DropdownMenuItem<String>(
+                value: c['id'],
+                child: Text(c['name']!, style: const TextStyle(fontSize: 14)),
+              ))
+          .toList(),
+      onChanged: (id) => setState(() {
+        _selectedCourseId   = id;
+        _selectedCourseName = _activeCourses.firstWhere((c) => c['id'] == id)['name'];
+      }),
+      validator: (v) => v == null ? '강좌를 선택해 주세요.' : null,
     );
   }
 

@@ -7,6 +7,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:file_picker/file_picker.dart';
 import '../../../core/enums/user_role.dart';
 import '../../../core/utils/firestore_keys.dart';
+import 'member_detail_readonly_view.dart';
 import 'package:firebase_core/firebase_core.dart';
 
 class MemberTab extends StatefulWidget {
@@ -361,6 +362,12 @@ class _MemberTabState extends State<MemberTab> {
 
   @override
   Widget build(BuildContext context) {
+    // 학생 역할은 이 탭 접근 불가
+    if (widget.userRole == UserRole.STUDENT) {
+      return const Center(
+        child: Text('접근 권한이 없습니다.', style: TextStyle(fontSize: 16, color: Color(0xFF757575))),
+      );
+    }
     return DefaultTabController(
       length: 2,
       child: Column(
@@ -405,28 +412,29 @@ class _MemberTabState extends State<MemberTab> {
                       style: TextStyle(fontSize: 14, color: Color(0xFF757575))),
                 ]),
               ),
-              Semantics(
-                label: '교사 등록 버튼입니다.',
-                child: ElevatedButton.icon(
-                  onPressed: () async {
-                    await showDialog(
-                      context: context,
-                      barrierDismissible: false,
-                      builder: (_) => _TeacherRegisterDialog(courses: _courses),
-                    );
-                    _loadTeachers();
-                  },
-                  icon: const Icon(Icons.add_rounded, size: 18),
-                  label: const Text('교사 등록'),
-                  style: ElevatedButton.styleFrom(
-                    minimumSize: const Size(0, 0),
-                    backgroundColor: _blue,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              if (widget.userRole == UserRole.SUPER_ADMIN)
+                Semantics(
+                  label: '교사 등록 버튼입니다.',
+                  child: ElevatedButton.icon(
+                    onPressed: () async {
+                      await showDialog(
+                        context: context,
+                        barrierDismissible: false,
+                        builder: (_) => _TeacherRegisterDialog(courses: _courses),
+                      );
+                      _loadTeachers();
+                    },
+                    icon: const Icon(Icons.add_rounded, size: 18),
+                    label: const Text('교사 등록'),
+                    style: ElevatedButton.styleFrom(
+                      minimumSize: const Size(0, 0),
+                      backgroundColor: _blue,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    ),
                   ),
                 ),
-              ),
             ],
           ),
           const SizedBox(height: 16),
@@ -495,15 +503,22 @@ class _MemberTabState extends State<MemberTab> {
     final phone    = (data[FsUser.phone]    as String?) ?? '';
     final photoUrl = (data[FsUser.photoUrl] as String?) ?? '';
     return Semantics(
-      label: '$name 교사 항목입니다. 클릭하면 정보를 수정합니다.',
+      label: '$name 교사 항목입니다. 클릭하면 정보를 ${widget.userRole == UserRole.INSTRUCTOR ? '조회' : '수정'}합니다.',
       child: InkWell(
         onTap: () async {
-          await showDialog(
-            context: context,
-            barrierDismissible: false,
-            builder: (_) => _TeacherEditDialog(doc: doc, courses: _courses),
-          );
-          _loadTeachers();
+          if (widget.userRole == UserRole.INSTRUCTOR) {
+            await showDialog(
+              context: context,
+              builder: (_) => MemberDetailReadonlyView(doc: doc, courses: _courses),
+            );
+          } else {
+            await showDialog(
+              context: context,
+              barrierDismissible: false,
+              builder: (_) => _TeacherEditDialog(doc: doc, courses: _courses),
+            );
+            _loadTeachers();
+          }
         },
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
@@ -829,13 +844,12 @@ class _TeacherRegisterDialogState extends State<_TeacherRegisterDialog> {
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
     
-    final email = _emailCtrl.text.trim(); //
+    final email = _emailCtrl.text.trim(); 
 
     setState(() => _isLoading = true);
 
     try {
-      // 1. [추가] Firestore를 통한 사전 중복 체크 (Proactive Check)
-      // Auth에 생성되기 전, 우리 DB(users 컬렉션)에 이미 해당 이메일이 있는지 먼저 확인합니다.
+      // 1. [추가] Firestore를 통한 사전 중복 체크
       final existingUser = await FirebaseFirestore.instance
           .collection(FsCol.users)
           .where(FsUser.email, isEqualTo: email)
@@ -848,7 +862,7 @@ class _TeacherRegisterDialogState extends State<_TeacherRegisterDialog> {
         return;
       }
 
-      // 2. 임시 앱 생성 및 Auth 계정 생성 (기존 로직 유지)
+      // 2. 임시 앱 생성 및 Auth 계정 생성
       final uniqueName = 'tempRegisterApp_${DateTime.now().millisecondsSinceEpoch}';
       FirebaseApp? tempApp = await Firebase.initializeApp(
         name: uniqueName,
@@ -859,13 +873,25 @@ class _TeacherRegisterDialogState extends State<_TeacherRegisterDialog> {
         final tempAuth = FirebaseAuth.instanceFor(app: tempApp);
         await tempAuth.setPersistence(Persistence.NONE);
 
+        // Auth에 계정 생성 (로그인용)
         final cred = await tempAuth.createUserWithEmailAndPassword(
           email: email,
           password: _pwCtrl.text,
         );
         final uid = cred.user!.uid;
 
-        // ... (이후 사진 업로드 및 Firestore 저장 로직은 기존과 동일)
+        // 🌟 [추가된 핵심 코드] Firestore users 컬렉션에 실제 데이터 저장 (INSERT 역할) 🌟
+        await FirebaseFirestore.instance.collection(FsCol.users).doc(uid).set({
+          FsUser.name: _nameCtrl.text.trim(),
+          FsUser.email: email,
+          FsUser.phone: _phoneCtrl.text.trim(),
+          FsUser.role: 'INSTRUCTOR',       // 교사 권한 명시
+          FsUser.status: 'approved',       // 승인 상태로 바로 등록
+          FsUser.isDeleted: false,         // 🚨 이전 무한 로딩 에러의 원인! 반드시 false로 저장
+          FsUser.bio: _bioCtrl.text.trim(),
+          FsUser.photoUrl: '',             // 사진은 현재 미사용 상태이므로 빈 값
+          FsUser.createdAt: FieldValue.serverTimestamp(), // 가입 시간 기록
+        });
         
         // 저장 성공 후 알림 및 닫기
         if (!mounted) return;

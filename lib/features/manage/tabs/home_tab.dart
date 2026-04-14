@@ -144,12 +144,15 @@ class HomeTab extends StatelessWidget {
 // Firestore 실시간 통계 카드
 // stream에서 문서 수를 세어 숫자로 표시합니다.
 // ─────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────
+// Firestore 실시간 통계 카드 (에러 처리 추가 버전)
+// ─────────────────────────────────────────────────────────
 class _FirestoreStatCard extends StatelessWidget {
-  final Stream<QuerySnapshot> stream; // Firestore 스트림
-  final String label;                 // 카드 제목
-  final IconData icon;                // 아이콘
-  final Color color;                  // 포인트 색상
-  final String unit;                  // 단위 (명, 개)
+  final Stream<QuerySnapshot> stream; 
+  final String label;                 
+  final IconData icon;                
+  final Color color;                  
+  final String unit;                  
 
   const _FirestoreStatCard({
     required this.stream,
@@ -164,60 +167,80 @@ class _FirestoreStatCard extends StatelessWidget {
     return StreamBuilder<QuerySnapshot>(
       stream: stream,
       builder: (context, snapshot) {
-        // 문서 수를 가져옵니다. 로딩 중이면 '-'를 표시합니다.
-        final count = snapshot.hasData ? snapshot.data!.docs.length : null;
-        final displayValue = count != null ? '$count$unit' : '-';
+        // 1. 에러가 발생한 경우 처리 (빨간색 에러 아이콘 표시)
+        if (snapshot.hasError) {
+          debugPrint('Firestore StatCard Error ($label): ${snapshot.error}'); // 콘솔에 에러 출력
+          return _buildCardContainer(
+            child: const Icon(Icons.error_outline, color: Colors.red, size: 28),
+          );
+        }
+
+        // 2. 로딩 중인 경우 처리
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return _buildCardContainer(
+            child: SizedBox(
+              width: 20, height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2, color: color),
+            ),
+          );
+        }
+
+        // 3. 정상적으로 데이터를 가져온 경우
+        final count = snapshot.data?.docs.length ?? 0;
+        final displayValue = '$count$unit';
 
         return Semantics(
           label: '$label: $displayValue',
-          child: Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(14),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.06),
-                  blurRadius: 10,
-                  offset: const Offset(0, 4),
-                )
-              ],
-            ),
-            child: Row(
-              children: [
-                // 아이콘 배지
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: color.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(icon, color: color, size: 24),
-                ),
-                const SizedBox(width: 16),
-                // 숫자 + 레이블
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    // 로딩 중이면 작은 인디케이터를 표시합니다.
-                    count == null
-                        ? SizedBox(
-                            width: 20, height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: color))
-                        : Text(displayValue,
-                            style: TextStyle(
-                                fontSize: 28, fontWeight: FontWeight.w800, color: color)),
-                    Text(label,
-                        style: const TextStyle(
-                            fontSize: 13, color: Color(0xFF757575), fontWeight: FontWeight.w500)),
-                  ],
-                ),
-              ],
-            ),
+          child: _buildCardContainer(
+            child: Text(displayValue,
+                style: TextStyle(
+                    fontSize: 28, fontWeight: FontWeight.w800, color: color)),
           ),
         );
       },
+    );
+  }
+
+  // 카드 UI 디자인을 공통으로 빼낸 헬퍼 메서드입니다.
+  Widget _buildCardContainer({required Widget child}) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.06),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          )
+        ],
+      ),
+      child: Row(
+        children: [
+          // 아이콘 배지
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icon, color: color, size: 24),
+          ),
+          const SizedBox(width: 16),
+          // 내용 (로딩, 에러, 혹은 숫자) + 레이블
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              child, // 이 자리에 숫자가 들어가거나 로딩바, 에러 아이콘이 들어갑니다.
+              Text(label,
+                  style: const TextStyle(
+                      fontSize: 13, color: Color(0xFF757575), fontWeight: FontWeight.w500)),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }

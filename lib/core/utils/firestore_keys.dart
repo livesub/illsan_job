@@ -85,11 +85,12 @@ class FsUser {
 
   // ── status 상태값 상수 ───────────────────────────────────
   static const String statusPending   = 'pending';    // 승인 대기
-  static const String statusActive    = 'active';     // 정상 활성
+  static const String statusActive = 'approved';     // 정상 활성
   static const String statusGraduated = 'graduated';  // 졸업/수료
   static const String statusDropped   = 'dropped';    // 중도탈락
   // 하위 호환 보존 (기존 데이터 마이그레이션 전까지 유지)
   static const String statusApproved  = 'approved';
+  static const String statusRejected  = 'rejected';   // 거절
 }
 
 // ─────────────────────────────────────────────────────────
