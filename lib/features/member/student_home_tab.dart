@@ -563,13 +563,12 @@ class _JobListItem extends StatelessWidget {
     final title       = data[FsJob.title]       as String? ?? '-';
     final authorName  = data[FsJob.authorName]  as String? ?? '-';
     final period      = data[FsJob.period]       as String? ?? '-';
-    final attachments = data[FsJob.attachments]  as List?   ?? [];
+    // final attachments = data[FsJob.attachments]  as List?   ?? []; // 차후 개발
     final viewCount   = data[FsJob.viewCount]    as int?    ?? 0;
-    final hasAttach   = attachments.isNotEmpty;
+    // final hasAttach   = attachments.isNotEmpty; // 차후 개발
 
     return Semantics(
-      label: '$index번 $title, $authorName 등록, 기간 $period, 조회 $viewCount회'
-          '${hasAttach ? ", 첨부파일 있음" : ""}',
+      label: '$index번 $title, $authorName 등록, 기간 $period, 조회 $viewCount회',
       button: true,
       child: GestureDetector(
         onTap: onTap,
@@ -615,11 +614,12 @@ class _JobListItem extends StatelessWidget {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis),
                         ),
-                        if (hasAttach) ...[
-                          const SizedBox(width: 4),
-                          const Icon(Icons.attach_file_rounded,
-                              size: 14, color: AppColors.textSecondary),
-                        ],
+                        // 차후 개발: 첨부파일 아이콘
+                        // if (hasAttach) ...[
+                        //   const SizedBox(width: 4),
+                        //   const Icon(Icons.attach_file_rounded,
+                        //       size: 14, color: AppColors.textSecondary),
+                        // ],
                       ],
                     ),
                     const SizedBox(height: 4),

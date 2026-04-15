@@ -273,12 +273,14 @@ class _BoardTabState extends State<BoardTab> {
   void _openJobDetail(QueryDocumentSnapshot doc) {
     Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (_) => _JobDetailPage(
+      PageRouteBuilder(
+        pageBuilder: (context, animation, secondaryAnimation) => _JobDetailPage(
           jobDoc: doc,
           userRole: widget.userRole,
           currentUid: _uid,
         ),
+        transitionDuration: Duration.zero,
+        reverseTransitionDuration: Duration.zero,
       ),
     );
   }
@@ -459,7 +461,7 @@ class _JobDetailPageState extends State<_JobDetailPage> {
       final db      = FirebaseFirestore.instance;
       final appRef  = db.collection(FsCol.jobApplications).doc(_appDocId);
       final userDoc = await db.collection(FsCol.users).doc(widget.currentUid).get();
-      final userData = userDoc.data()!;
+      final userData = userDoc.data() ?? {};
       final jobData  = widget.jobDoc.data() as Map<String, dynamic>;
 
       final courseId = userData[FsUser.courseId] as String? ?? '';
@@ -620,9 +622,22 @@ class _CommentSectionState extends State<_CommentSection> {
   final _inputCtrl = TextEditingController();
   bool _sending = false;
 
+  // 스트림 1회 생성 — 리빌드마다 재구독 방지
+  late final Stream<QuerySnapshot> _commentStream;
+
   bool get _isInstructor =>
       widget.userRole == UserRole.INSTRUCTOR ||
       widget.userRole == UserRole.SUPER_ADMIN;
+
+  @override
+  void initState() {
+    super.initState();
+    _commentStream = FirebaseFirestore.instance
+        .collection(FsCol.jobComments)
+        .where(FsJobComment.jobId, isEqualTo: widget.jobId)
+        .orderBy(FsJobComment.createdAt)
+        .snapshots();
+  }
 
   @override
   void dispose() {
@@ -724,11 +739,7 @@ class _CommentSectionState extends State<_CommentSection> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         StreamBuilder<QuerySnapshot>(
-          stream: FirebaseFirestore.instance
-              .collection(FsCol.jobComments)
-              .where(FsJobComment.jobId, isEqualTo: widget.jobId)
-              .orderBy(FsJobComment.createdAt)
-              .snapshots(),
+          stream: _commentStream,
           builder: (context, snap) {
             if (snap.connectionState == ConnectionState.waiting) {
               return const Padding(

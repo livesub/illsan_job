@@ -33,7 +33,7 @@ class _NoticeTabState extends State<NoticeTab> {
   static const int _pageSize = 10;
   static const Color _blue = Color(0xFF1565C0);
 
-  final String _uid = FirebaseAuth.instance.currentUser!.uid;
+  String get _uid => FirebaseAuth.instance.currentUser?.uid ?? '';
 
   List<QueryDocumentSnapshot> _allNotices      = [];
   List<QueryDocumentSnapshot> _filteredNotices = [];
@@ -85,8 +85,8 @@ class _NoticeTabState extends State<NoticeTab> {
   // 타겟 값 → 배지 텍스트
   static String _badgeLabel(String target) {
     switch (target) {
-      case FsNotice.targetTeachers:  return '교사';
-      case FsNotice.targetStudents:  return '학생';
+      case FsNotice.targetTeachers:  return '전체 교사';
+      case FsNotice.targetStudents:  return '전체 학생';
       case FsNotice.targetCourse:    return '특정반';
       case FsNotice.targetCourseAll: return '전체반';
       default: return '전체';
@@ -110,10 +110,7 @@ class _NoticeTabState extends State<NoticeTab> {
       final data = doc.data() as Map<String, dynamic>;
       if (_typeFilter != null) {
         final t = data[FsNotice.target] as String? ?? '';
-        // '전체 공지' 필터: all / teachers / students 포함
-        final isGlobal = t == FsNotice.targetAll || t == FsNotice.targetTeachers || t == FsNotice.targetStudents;
-        if (_typeFilter == FsNotice.targetAll && !isGlobal) return false;
-        if (_typeFilter == FsNotice.targetCourse && isGlobal) return false;
+        if (t != _typeFilter) return false;
       }
       if (search.isNotEmpty) {
         final title = (data[FsNotice.title] as String? ?? '').toLowerCase();
@@ -334,9 +331,9 @@ class _NoticeTabState extends State<NoticeTab> {
               children: [
                 _buildFilterChip('전체', null),
                 const SizedBox(width: 8),
-                _buildFilterChip('전체 공지', FsNotice.targetAll),
+                _buildFilterChip('전체 교사', FsNotice.targetTeachers),
                 const SizedBox(width: 8),
-                _buildFilterChip('반별 공지', FsNotice.targetCourse),
+                _buildFilterChip('전체 학생', FsNotice.targetStudents),
               ],
             ),
           ),

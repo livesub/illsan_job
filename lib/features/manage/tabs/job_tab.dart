@@ -30,7 +30,7 @@ class _JobTabState extends State<JobTab> {
   static const int _pageSize = 10;
   static const Color _blue = Color(0xFF1565C0);
 
-  final String _uid = FirebaseAuth.instance.currentUser!.uid;
+  String get _uid => FirebaseAuth.instance.currentUser?.uid ?? '';
 
   List<QueryDocumentSnapshot> _allJobs      = [];
   List<QueryDocumentSnapshot> _filteredJobs = [];
@@ -59,7 +59,7 @@ class _JobTabState extends State<JobTab> {
     try {
       final snap = await FirebaseFirestore.instance
           .collection(FsCol.jobs)
-          .where(FsJob.isDeleted, isNotEqualTo: true)
+          .where(FsJob.isDeleted, isEqualTo: false)
           .orderBy(FsJob.createdAt, descending: true)
           .limit(200)
           .get();

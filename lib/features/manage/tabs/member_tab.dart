@@ -795,8 +795,18 @@ class _MemberTabState extends State<MemberTab> {
   String _formatDate(dynamic val) {
     if (val == null) return '-';
     try {
-      final dt = (val as Timestamp).toDate();
-      return '${dt.year}.${dt.month.toString().padLeft(2, '0')}.${dt.day.toString().padLeft(2, '0')}';
+      if (val is Timestamp) {
+        final dt = val.toDate();
+        return '${dt.year}.${dt.month.toString().padLeft(2, '0')}.${dt.day.toString().padLeft(2, '0')}';
+      }
+      // yymmddHHmmss 문자열 포맷 (e.g. '260401090500')
+      if (val is String && val.length >= 6) {
+        final yy = int.parse(val.substring(0, 2)) + 2000;
+        final mm = val.substring(2, 4);
+        final dd = val.substring(4, 6);
+        return '$yy.$mm.$dd';
+      }
+      return '-';
     } catch (_) {
       return '-';
     }

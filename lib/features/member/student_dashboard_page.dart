@@ -67,16 +67,14 @@ class _StudentDashboardPageState extends State<StudentDashboardPage> {
   }
 
   Widget _buildBody() {
-    switch (_tabIndex) {
-      case 0:
-        return StudentHomeTab(
+    return IndexedStack(
+      index: _tabIndex,
+      children: [
+        StudentHomeTab(
           userName: widget.userName,
           onViewApplications: () => setState(() => _tabIndex = 1),
-        );
-      case 2:
-        return BoardTab(userRole: widget.userRole, userName: widget.userName);
-      default:
-        return Center(
+        ),
+        Center(
           child: Semantics(
             label: '준비 중인 화면입니다.',
             child: const Text(
@@ -84,8 +82,10 @@ class _StudentDashboardPageState extends State<StudentDashboardPage> {
               style: TextStyle(fontSize: 15, color: Color(0xFF757575)),
             ),
           ),
-        );
-    }
+        ),
+        BoardTab(userRole: widget.userRole, userName: widget.userName),
+      ],
+    );
   }
 
   Future<void> _logout() async {

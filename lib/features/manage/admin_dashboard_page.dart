@@ -115,28 +115,22 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
     ];
   }
 
-  // 현재 선택된 인덱스에 해당하는 콘텐츠 탭을 반환합니다.
+  // 탭 전환 시 위젯 재생성 방지 — IndexedStack으로 상태 유지
   Widget _buildContent() {
-    // SUPER_ADMIN과 INSTRUCTOR의 메뉴 인덱스 매핑이 다르므로 분기합니다.
-    if (widget.userRole == UserRole.SUPER_ADMIN) {
-      // SUPER_ADMIN: 홈(0), 회원(1), 강좌(2), 공지(3)
-      switch (_selectedIndex) {
-        case 0: return const HomeTab();
-        case 1: return MemberTab(userRole: widget.userRole);
-        case 2: return const CourseTab();
-        case 3: return NoticeTab(userRole: widget.userRole, userName: widget.userName);
-        default: return const HomeTab();
-      }
-    } else {
-      // INSTRUCTOR: 홈(0), 회원(1), 공지(2), 구직(3)
-      switch (_selectedIndex) {
-        case 0: return const InstructorHomeTab();
-        case 1: return MemberTab(userRole: widget.userRole);
-        case 2: return NoticeTab(userRole: widget.userRole, userName: widget.userName);
-        case 3: return JobTab(userRole: widget.userRole, userName: widget.userName);
-        default: return const HomeTab();
-      }
-    }
+    final children = widget.userRole == UserRole.SUPER_ADMIN
+        ? <Widget>[
+            const HomeTab(),
+            MemberTab(userRole: widget.userRole),
+            const CourseTab(),
+            NoticeTab(userRole: widget.userRole, userName: widget.userName),
+          ]
+        : <Widget>[
+            const InstructorHomeTab(),
+            MemberTab(userRole: widget.userRole),
+            NoticeTab(userRole: widget.userRole, userName: widget.userName),
+            JobTab(userRole: widget.userRole, userName: widget.userName),
+          ];
+    return IndexedStack(index: _selectedIndex, children: children);
   }
 
   @override

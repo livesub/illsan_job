@@ -28,8 +28,9 @@ class _StudentJobDetailPageState extends State<StudentJobDetailPage> {
   bool _applyLoading = false;
   bool _checkLoading = true;
 
-  // 댓글 입력 컨트롤러 / 대댓글 대상 상태
-  final _commentCtrl = TextEditingController();
+  // 댓글 입력 컨트롤러 / 포커스노드 / 대댓글 대상 상태
+  final _commentCtrl      = TextEditingController();
+  final _commentFocusNode = FocusNode(); // StreamBuilder 리빌드 시 포커스 유지
   String? _replyToId;
   String? _replyToAuthor;
   bool _commentLoading = false;
@@ -43,6 +44,7 @@ class _StudentJobDetailPageState extends State<StudentJobDetailPage> {
   @override
   void dispose() {
     _commentCtrl.dispose();
+    _commentFocusNode.dispose();
     super.dispose();
   }
 
@@ -195,8 +197,8 @@ class _StudentJobDetailPageState extends State<StudentJobDetailPage> {
     final period      = data[FsJob.period]       as String? ?? '-';
     final viewCount   = data[FsJob.viewCount]    as int?    ?? 0;
     final content     = data[FsJob.content]      as String? ?? '';
-    final attachments =
-        List<String>.from(data[FsJob.attachments] as List? ?? []);
+    // final attachments =
+    //     List<String>.from(data[FsJob.attachments] as List? ?? []); // 차후 개발
     // HTML 태그 제거 후 평문 표시
     final plainText =
         content.replaceAll(RegExp(r'<[^>]*>'), '').trim();
@@ -211,8 +213,7 @@ class _StudentJobDetailPageState extends State<StudentJobDetailPage> {
         foregroundColor: Colors.white,
         elevation: 0,
       ),
-      body: RepaintBoundary(
-        child: SingleChildScrollView(
+      body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -254,21 +255,21 @@ class _StudentJobDetailPageState extends State<StudentJobDetailPage> {
             ),
             const SizedBox(height: 16),
 
-            // 첨부파일
-            _buildSection(
-              title: '첨부파일',
-              child: attachments.isEmpty
-                  ? const Text('첨부파일이 없습니다.',
-                      style: TextStyle(
-                          fontSize: 14, color: AppColors.textSecondary))
-                  : Column(
-                      children: attachments
-                          .asMap()
-                          .entries
-                          .map((e) => _buildAttachRow(e.key + 1, e.value))
-                          .toList(),
-                    ),
-            ),
+            // 첨부파일 — 차후 개발
+            // _buildSection(
+            //   title: '첨부파일',
+            //   child: attachments.isEmpty
+            //       ? const Text('첨부파일이 없습니다.',
+            //           style: TextStyle(
+            //               fontSize: 14, color: AppColors.textSecondary))
+            //       : Column(
+            //           children: attachments
+            //               .asMap()
+            //               .entries
+            //               .map((e) => _buildAttachRow(e.key + 1, e.value))
+            //               .toList(),
+            //         ),
+            // ),
             const SizedBox(height: 32),
 
             // 지원하기 / 신청 취소 버튼
@@ -280,7 +281,7 @@ class _StudentJobDetailPageState extends State<StudentJobDetailPage> {
             const SizedBox(height: 32),
           ],
         ),
-      )),
+      ),
     );
   }
 
@@ -361,48 +362,48 @@ class _StudentJobDetailPageState extends State<StudentJobDetailPage> {
     );
   }
 
-  // 첨부파일 행 — 파일명 표시 + 다운로드 안내
-  Widget _buildAttachRow(int no, String path) {
-    final fileName = path.split('/').last;
-    return Semantics(
-      label: '첨부파일 $no번: $fileName',
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 6),
-        child: Row(
-          children: [
-            const Icon(Icons.insert_drive_file_rounded,
-                size: 18, color: AppColors.primary),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(fileName,
-                  style: const TextStyle(
-                      fontSize: 13, color: AppColors.textPrimary),
-                  overflow: TextOverflow.ellipsis),
-            ),
-            Semantics(
-              label: '다운로드 버튼',
-              button: true,
-              child: TextButton.icon(
-                onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                      content: Text('다운로드 기능은 준비 중입니다.'),
-                      duration: Duration(seconds: 2)),
-                ),
-                icon: const Icon(Icons.download_rounded,
-                    size: 16, color: AppColors.primary),
-                label: const Text('다운로드',
-                    style: TextStyle(
-                        fontSize: 12, color: AppColors.primary)),
-                style: TextButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 4)),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+  // 첨부파일 행 — 차후 개발
+  // Widget _buildAttachRow(int no, String path) {
+  //   final fileName = path.split('/').last;
+  //   return Semantics(
+  //     label: '첨부파일 $no번: $fileName',
+  //     child: Padding(
+  //       padding: const EdgeInsets.symmetric(vertical: 6),
+  //       child: Row(
+  //         children: [
+  //           const Icon(Icons.insert_drive_file_rounded,
+  //               size: 18, color: AppColors.primary),
+  //           const SizedBox(width: 8),
+  //           Expanded(
+  //             child: Text(fileName,
+  //                 style: const TextStyle(
+  //                     fontSize: 13, color: AppColors.textPrimary),
+  //                 overflow: TextOverflow.ellipsis),
+  //           ),
+  //           Semantics(
+  //             label: '다운로드 버튼',
+  //             button: true,
+  //             child: TextButton.icon(
+  //               onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
+  //                 const SnackBar(
+  //                     content: Text('다운로드 기능은 준비 중입니다.'),
+  //                     duration: Duration(seconds: 2)),
+  //               ),
+  //               icon: const Icon(Icons.download_rounded,
+  //                   size: 16, color: AppColors.primary),
+  //               label: const Text('다운로드',
+  //                   style: TextStyle(
+  //                       fontSize: 12, color: AppColors.primary)),
+  //               style: TextButton.styleFrom(
+  //                   padding: const EdgeInsets.symmetric(
+  //                       horizontal: 8, vertical: 4)),
+  //             ),
+  //           ),
+  //         ],
+  //       ),
+  //     ),
+  //   );
+  // }
 
   // 이메일 앞 4자 노출, 나머지 마스킹
   String _maskEmail(String email) {
@@ -529,139 +530,162 @@ class _StudentJobDetailPageState extends State<StudentJobDetailPage> {
   }
 
   // Q&A 섹션 — StreamBuilder 실시간
+  // Q&A 섹션 — 입력창은 StreamBuilder 외부 독립 배치 (포커스 유지)
   Widget _buildCommentSection() {
-    return StreamBuilder<QuerySnapshot>(
-      stream: _commentStream,
-      builder: (context, snap) {
-        final docs    = snap.data?.docs ?? [];
-        final parents = docs.where((d) {
-          return (d.data() as Map<String, dynamic>)[FsJobComment.parentId] == null;
-        }).toList();
-        final replies = docs.where((d) {
-          return (d.data() as Map<String, dynamic>)[FsJobComment.parentId] != null;
-        }).toList();
-
-        return _buildSection(
-          title: 'Q&A (${docs.length})',
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // 대댓글 대상 표시 배너
-              if (_replyToAuthor != null)
-                Container(
-                  margin: const EdgeInsets.only(bottom: 8),
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: AppColors.primary.withValues(alpha: 0.08),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          '$_replyToAuthor 님에게 대댓글 작성 중',
-                          style: const TextStyle(fontSize: 12, color: AppColors.primary),
-                        ),
-                      ),
-                      Semantics(
-                        label: '대댓글 작성 취소 버튼',
-                        button: true,
-                        child: GestureDetector(
-                          onTap: () => setState(() {
-                            _replyToId     = null;
-                            _replyToAuthor = null;
-                          }),
-                          child: const Icon(Icons.close, size: 16, color: AppColors.primary),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              // 입력창
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withValues(alpha: 0.04),
+              blurRadius: 6,
+              offset: const Offset(0, 2)),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 타이틀
+          const Text('Q&A',
+              style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.textPrimary)),
+          const Divider(height: 20),
+          // 대댓글 배너 — StreamBuilder 외부
+          if (_replyToAuthor != null)
+            Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: AppColors.primary.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
                 children: [
                   Expanded(
-                    child: TextField(
-                      controller: _commentCtrl,
-                      maxLines: 3,
-                      minLines: 1,
-                      style: const TextStyle(fontSize: 13),
-                      decoration: InputDecoration(
-                        hintText: '댓글을 입력하세요.',
-                        hintStyle: const TextStyle(fontSize: 13),
-                        contentPadding:
-                            const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                        border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(10)),
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10),
-                          borderSide: const BorderSide(color: Color(0xFFE0E0E0)),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10),
-                          borderSide:
-                              const BorderSide(color: AppColors.primary),
-                        ),
-                      ),
+                    child: Text(
+                      '$_replyToAuthor 님에게 대댓글 작성 중',
+                      style: const TextStyle(fontSize: 12, color: AppColors.primary),
                     ),
                   ),
-                  const SizedBox(width: 8),
                   Semantics(
-                    label: '댓글 등록 버튼',
+                    label: '대댓글 작성 취소 버튼',
                     button: true,
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        minimumSize: const Size(0, 48),
-                        backgroundColor: AppColors.primary,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 14, vertical: 14),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10)),
-                        elevation: 0,
-                      ),
-                      onPressed: _commentLoading ? null : _addComment,
-                      child: _commentLoading
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(
-                                  strokeWidth: 2, color: Colors.white))
-                          : const Text('등록',
-                              style: TextStyle(
-                                  fontSize: 13, fontWeight: FontWeight.w600)),
+                    child: GestureDetector(
+                      onTap: () => setState(() {
+                        _replyToId     = null;
+                        _replyToAuthor = null;
+                      }),
+                      child: const Icon(Icons.close, size: 16, color: AppColors.primary),
                     ),
                   ),
                 ],
               ),
-              if (parents.isEmpty)
-                const Padding(
+            ),
+          // 입력창 — StreamBuilder 외부 독립 배치 (리빌드 시 포커스 유지)
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _commentCtrl,
+                  focusNode: _commentFocusNode,
+                  maxLines: 3,
+                  minLines: 1,
+                  style: const TextStyle(fontSize: 13),
+                  decoration: InputDecoration(
+                    hintText: '댓글을 입력하세요.',
+                    hintStyle: const TextStyle(fontSize: 13),
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: const BorderSide(color: Color(0xFFE0E0E0)),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: const BorderSide(color: AppColors.primary),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Semantics(
+                label: '댓글 등록 버튼',
+                button: true,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    minimumSize: const Size(0, 48),
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 14),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                    elevation: 0,
+                  ),
+                  onPressed: _commentLoading ? null : _addComment,
+                  child: _commentLoading
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Colors.white))
+                      : const Text('등록',
+                          style: TextStyle(
+                              fontSize: 13, fontWeight: FontWeight.w600)),
+                ),
+              ),
+            ],
+          ),
+          // 댓글 목록 — StreamBuilder (입력창과 분리)
+          StreamBuilder<QuerySnapshot>(
+            stream: _commentStream,
+            builder: (context, snap) {
+              final docs    = snap.data?.docs ?? [];
+              final parents = docs.where((d) {
+                return (d.data() as Map<String, dynamic>)[FsJobComment.parentId] == null;
+              }).toList();
+              final replies = docs.where((d) {
+                return (d.data() as Map<String, dynamic>)[FsJobComment.parentId] != null;
+              }).toList();
+              if (parents.isEmpty) {
+                return const Padding(
                   padding: EdgeInsets.only(top: 16),
                   child: Text('첫 댓글을 남겨보세요.',
                       style: TextStyle(
                           fontSize: 13, color: AppColors.textSecondary)),
-                )
-              else ...[
-                const Divider(height: 24),
-                ...parents.map((parentDoc) {
-                  final parentData = parentDoc.data() as Map<String, dynamic>;
-                  final childDocs  = replies.where((r) {
-                    final rd = r.data() as Map<String, dynamic>;
-                    return rd[FsJobComment.parentId] == parentDoc.id;
-                  }).toList();
-                  return _buildCommentItem(
-                    doc: parentDoc,
-                    data: parentData,
-                    isReply: false,
-                    childDocs: childDocs,
-                  );
-                }),
-              ],
-            ],
+                );
+              }
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Divider(height: 24),
+                  ...parents.map((parentDoc) {
+                    final parentData = parentDoc.data() as Map<String, dynamic>;
+                    final childDocs  = replies.where((r) {
+                      final rd = r.data() as Map<String, dynamic>;
+                      return rd[FsJobComment.parentId] == parentDoc.id;
+                    }).toList();
+                    return _buildCommentItem(
+                      doc: parentDoc,
+                      data: parentData,
+                      isReply: false,
+                      childDocs: childDocs,
+                    );
+                  }),
+                ],
+              );
+            },
           ),
-        );
-      },
+        ],
+      ),
     );
   }
 
@@ -846,9 +870,4 @@ class _StudentJobDetailPageState extends State<StudentJobDetailPage> {
       ),
     );
   }
-}
-
-// 미로그인 방어용 — 현재 사용자 UID 헬퍼
-extension _CurrentUser on FirebaseAuth {
-  String get safeUid => currentUser?.uid ?? '';
 }

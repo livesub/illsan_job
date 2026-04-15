@@ -129,8 +129,7 @@ class _InstructorHomeTabState extends State<InstructorHomeTab>
         SnackBar(content: Text('데이터 로드 실패: $e'), backgroundColor: Colors.red),
       );
     } finally {
-      if (!mounted) return;
-      setState(() => _isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
