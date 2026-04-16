@@ -7,10 +7,12 @@
 //   - 제목 검색은 클라이언트에서 처리
 //   - 페이징도 클라이언트에서 처리
 
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:flutter_quill/flutter_quill.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:cross_file/cross_file.dart';
@@ -549,10 +551,12 @@ class _JobFormDialog extends StatefulWidget {
 }
 
 class _JobFormDialogState extends State<_JobFormDialog> {
-  final _formKey     = GlobalKey<FormState>();
-  final _titleCtrl   = TextEditingController();
-  final _periodCtrl  = TextEditingController();
-  final _contentCtrl = TextEditingController();
+  final _formKey        = GlobalKey<FormState>();
+  final _titleCtrl      = TextEditingController();
+  final _periodCtrl     = TextEditingController();
+  final _editorFocus    = FocusNode();
+  final _editorScroll   = ScrollController();
+  late  QuillController _quillCtrl;
 
   bool _saving = false;
   bool get _isEdit => widget.editDoc != null;
@@ -582,11 +586,35 @@ class _JobFormDialogState extends State<_JobFormDialog> {
   @override
   void initState() {
     super.initState();
-    _loadCourses();
     if (_isEdit) {
+      final data = widget.editDoc!.data() as Map<String, dynamic>;
+      _quillCtrl = _initQuillController(data[FsJob.content] as String? ?? '');
       _prefillForm();
       _loadInlineImages();
       _loadExistAttachments();
+    } else {
+      _quillCtrl = QuillController(
+        document: Document(),
+        selection: const TextSelection.collapsed(offset: 0),
+      );
+    }
+    _loadCourses();
+  }
+
+  // 기존 content(plain text 또는 delta JSON) → QuillController 초기화
+  QuillController _initQuillController(String raw) {
+    try {
+      return QuillController(
+        document: Document.fromJson(jsonDecode(raw) as List),
+        selection: const TextSelection.collapsed(offset: 0),
+      );
+    } catch (_) {
+      final doc = Document();
+      if (raw.isNotEmpty) doc.insert(0, raw);
+      return QuillController(
+        document: doc,
+        selection: const TextSelection.collapsed(offset: 0),
+      );
     }
   }
 
@@ -594,7 +622,9 @@ class _JobFormDialogState extends State<_JobFormDialog> {
   void dispose() {
     _titleCtrl.dispose();
     _periodCtrl.dispose();
-    _contentCtrl.dispose();
+    _editorFocus.dispose();
+    _editorScroll.dispose();
+    _quillCtrl.dispose();
     super.dispose();
   }
 
@@ -619,9 +649,9 @@ class _JobFormDialogState extends State<_JobFormDialog> {
 
   void _prefillForm() {
     final data = widget.editDoc!.data() as Map<String, dynamic>;
-    _titleCtrl.text   = data[FsJob.title]  as String? ?? '';
-    _periodCtrl.text  = data[FsJob.period] as String? ?? '';
-    _contentCtrl.text = data[FsJob.content] as String? ?? '';
+    _titleCtrl.text  = data[FsJob.title]  as String? ?? '';
+    _periodCtrl.text = data[FsJob.period] as String? ?? '';
+    // content는 _initQuillController에서 _quillCtrl로 초기화됨
 
     final tc = (data[FsJob.targetCourses] as List?)?.cast<String>() ?? [FsJob.targetAll];
     if (tc.contains(FsJob.targetAll)) {
@@ -745,25 +775,18 @@ class _JobFormDialogState extends State<_JobFormDialog> {
     setState(() => _newAttachFiles.removeAt(index));
   }
 
-  void _wrapSelection(String open, String close) {
-    final sel  = _contentCtrl.selection;
-    if (!sel.isValid) return;
-    final text     = _contentCtrl.text;
-    final before   = text.substring(0, sel.start);
-    final selected = text.substring(sel.start, sel.end);
-    final after    = text.substring(sel.end);
-    _contentCtrl.value = TextEditingValue(
-      text: '$before$open$selected$close$after',
-      selection: TextSelection.collapsed(
-          offset: sel.start + open.length + selected.length + close.length),
-    );
-  }
-
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
     if (!_targetAll && _selectedCourseIds.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('노출할 반을 하나 이상 선택해 주세요.'), backgroundColor: Colors.orange),
+      );
+      return;
+    }
+    // Quill 에디터는 FormField가 아니므로 별도 내용 검증
+    if (_quillCtrl.document.toPlainText().trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('내용을 입력해 주세요.'), backgroundColor: Colors.orange),
       );
       return;
     }
@@ -796,7 +819,7 @@ class _JobFormDialogState extends State<_JobFormDialog> {
       final payload = <String, dynamic>{
         FsJob.title:         _titleCtrl.text.trim(),
         FsJob.period:        _periodCtrl.text.trim(),
-        FsJob.content:       _contentCtrl.text.trim(),
+        FsJob.content:       jsonEncode(_quillCtrl.document.toDelta().toJson()),
         FsJob.inlineImgs:    _imgPaths,
         FsJob.attachments:   uploadedPaths,
         FsJob.targetCourses: targetCourses,
@@ -919,7 +942,7 @@ class _JobFormDialogState extends State<_JobFormDialog> {
                     _buildSmartEditor(),
                     const SizedBox(height: 20),
 
-                    // 5. 첨부파일
+                    /* 차후 사용 예정 — 첨부파일
                     _buildLabel('첨부파일'),
                     const SizedBox(height: 4),
                     const Text('최대 3개 · 각 3MB 이하',
@@ -927,6 +950,7 @@ class _JobFormDialogState extends State<_JobFormDialog> {
                     const SizedBox(height: 8),
                     _buildAttachSection(),
                     const SizedBox(height: 28),
+                    */
 
                     // 저장 버튼
                     Semantics(
@@ -1053,103 +1077,66 @@ class _JobFormDialogState extends State<_JobFormDialog> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // QuillSimpleToolbar — 이미지/비디오/카메라 버튼 숨김
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          decoration: BoxDecoration(
-            color: const Color(0xFFF5F5F5),
-            border: Border.all(color: const Color(0xFFE0E0E0)),
-            borderRadius: const BorderRadius.only(
-              topLeft: Radius.circular(10),
+          decoration: const BoxDecoration(
+            color: Color(0xFFF5F5F5),
+            border: Border(
+              top:   BorderSide(color: Color(0xFFE0E0E0)),
+              left:  BorderSide(color: Color(0xFFE0E0E0)),
+              right: BorderSide(color: Color(0xFFE0E0E0)),
+            ),
+            borderRadius: BorderRadius.only(
+              topLeft:  Radius.circular(10),
               topRight: Radius.circular(10),
             ),
           ),
-          child: Row(children: [
-            Semantics(
-              label: '굵게 서식 버튼입니다.',
-              child: IconButton(
-                icon: const Icon(Icons.format_bold_rounded, size: 20),
-                onPressed: () => _wrapSelection('<b>', '</b>'),
-                tooltip: '굵게',
-                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                padding: EdgeInsets.zero,
-              ),
-            ),
-            Semantics(
-              label: '기울임 서식 버튼입니다.',
-              child: IconButton(
-                icon: const Icon(Icons.format_italic_rounded, size: 20),
-                onPressed: () => _wrapSelection('<i>', '</i>'),
-                tooltip: '기울임',
-                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                padding: EdgeInsets.zero,
-              ),
-            ),
-            Semantics(
-              label: '밑줄 서식 버튼입니다.',
-              child: IconButton(
-                icon: const Icon(Icons.format_underline_rounded, size: 20),
-                onPressed: () => _wrapSelection('<u>', '</u>'),
-                tooltip: '밑줄',
-                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                padding: EdgeInsets.zero,
-              ),
-            ),
-            const VerticalDivider(width: 16, thickness: 1, color: Color(0xFFE0E0E0)),
-            Semantics(
-              label: '이미지 추가 버튼입니다.',
-              child: _uploadingImg
-                  ? const SizedBox(
-                      width: 20, height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2))
-                  : IconButton(
-                      icon: const Icon(Icons.image_rounded, size: 20, color: _blue),
-                      onPressed: _pickAndUploadImage,
-                      tooltip: '이미지 추가',
-                      constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                      padding: EdgeInsets.zero,
-                    ),
-            ),
-          ]),
-        ),
-        Semantics(
-          label: '구직 공고 내용 입력란입니다. 필수 항목입니다.',
-          child: TextFormField(
-            controller: _contentCtrl,
-            maxLines: 8,
-            decoration: InputDecoration(
-              hintText: '구직 공고 내용을 입력하세요.',
-              hintStyle: const TextStyle(color: Color(0xFFBDBDBD), fontSize: 13),
-              filled: true,
-              fillColor: Colors.white,
-              border: const OutlineInputBorder(
-                borderRadius: BorderRadius.only(
-                    bottomLeft: Radius.circular(10),
-                    bottomRight: Radius.circular(10)),
-                borderSide: BorderSide(color: Color(0xFFE0E0E0)),
-              ),
-              enabledBorder: const OutlineInputBorder(
-                borderRadius: BorderRadius.only(
-                    bottomLeft: Radius.circular(10),
-                    bottomRight: Radius.circular(10)),
-                borderSide: BorderSide(color: Color(0xFFE0E0E0)),
-              ),
-              focusedBorder: const OutlineInputBorder(
-                borderRadius: BorderRadius.only(
-                    bottomLeft: Radius.circular(10),
-                    bottomRight: Radius.circular(10)),
-                borderSide: BorderSide(color: _blue, width: 2),
-              ),
-              errorBorder: const OutlineInputBorder(
-                borderRadius: BorderRadius.only(
-                    bottomLeft: Radius.circular(10),
-                    bottomRight: Radius.circular(10)),
-                borderSide: BorderSide(color: Colors.red),
-              ),
-              contentPadding: const EdgeInsets.all(14),
-            ),
-            validator: (v) =>
-                (v == null || v.trim().isEmpty) ? '내용을 입력해 주세요.' : null,
+          child: QuillSimpleToolbar(
+            controller: _quillCtrl,
+            config: const QuillSimpleToolbarConfig(),
           ),
+        ),
+        // QuillEditor — 드래그/붙여넣기 이미지 삽입 차단
+        Container(
+          constraints: const BoxConstraints(minHeight: 160),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            border: Border.all(color: const Color(0xFFE0E0E0)),
+            borderRadius: const BorderRadius.only(
+              bottomLeft:  Radius.circular(10),
+              bottomRight: Radius.circular(10),
+            ),
+          ),
+          child: QuillEditor(
+            controller: _quillCtrl,
+            focusNode: _editorFocus,
+            scrollController: _editorScroll,
+            config: const QuillEditorConfig(
+              placeholder: '구직 공고 내용을 입력하세요.',
+              padding: EdgeInsets.all(14),
+            ),
+          ),
+        ),
+        /* 차후 사용 예정 — 이미지 추가
+        const SizedBox(height: 10),
+        Semantics(
+          label: '이미지 추가 버튼입니다.',
+          child: _uploadingImg
+              ? const SizedBox(
+                  width: 20, height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2))
+              : OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: _blue,
+                    side: const BorderSide(color: _blue),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    minimumSize: Size.zero,
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  ),
+                  onPressed: _pickAndUploadImage,
+                  icon: const Icon(Icons.image_rounded, size: 16),
+                  label: const Text('이미지 추가', style: TextStyle(fontSize: 13)),
+                ),
         ),
         if (_imgPaths.isNotEmpty) ...[
           const SizedBox(height: 12),
@@ -1194,6 +1181,7 @@ class _JobFormDialogState extends State<_JobFormDialog> {
             }),
           ),
         ],
+        */
       ],
     );
   }
@@ -1327,6 +1315,8 @@ class _JobDetailPageState extends State<_JobDetailPage> {
 
   // Q&A 댓글 입력 상태
   final _commentCtrl       = TextEditingController();
+  final _contentFocus      = FocusNode();
+  final _contentScroll     = ScrollController();
   String? _replyTargetId;    // null=최상위 댓글, 값=대댓글 대상 댓글ID
   String? _replyTargetAuthor;
   bool    _submittingComment = false;
@@ -1334,6 +1324,8 @@ class _JobDetailPageState extends State<_JobDetailPage> {
   @override
   void dispose() {
     _commentCtrl.dispose();
+    _contentFocus.dispose();
+    _contentScroll.dispose();
     super.dispose();
   }
 
@@ -1429,6 +1421,31 @@ class _JobDetailPageState extends State<_JobDetailPage> {
     );
   }
 
+  Widget _buildContentEditor(String content) {
+    QuillController ctrl;
+    try {
+      ctrl = QuillController(
+        document: Document.fromJson(jsonDecode(content) as List),
+        selection: const TextSelection.collapsed(offset: 0),
+        readOnly: true,
+      );
+    } catch (_) {
+      final doc = Document();
+      if (content.isNotEmpty) doc.insert(0, content);
+      ctrl = QuillController(
+        document: doc,
+        selection: const TextSelection.collapsed(offset: 0),
+        readOnly: true,
+      );
+    }
+    return QuillEditor(
+      controller: ctrl,
+      focusNode: _contentFocus,
+      scrollController: _contentScroll,
+      config: const QuillEditorConfig(),
+    );
+  }
+
   Widget _buildInfoCard({
     required String title,
     required String content,
@@ -1479,7 +1496,7 @@ class _JobDetailPageState extends State<_JobDetailPage> {
                 style: const TextStyle(fontSize: 13, color: Color(0xFF757575))),
           ]),
           const Divider(height: 24),
-          Text(content, style: const TextStyle(fontSize: 14, height: 1.6)),
+          _buildContentEditor(content),
           if (attachPaths.isNotEmpty) ...[
             const Divider(height: 24),
             const Text('첨부파일',
