@@ -707,6 +707,8 @@ class _StudentJobDetailPageState extends State<StudentJobDetailPage> {
     final children = all
         .where((d) => (d.data() as Map)[FsJobComment.parentId] == parentId)
         .toList();
+    // 최대 3단계(24px)까지만 들여쓰기, 이후 고정
+    final clampedDepth = depth.clamp(0, 3);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: children.map((doc) {
@@ -725,17 +727,17 @@ class _StudentJobDetailPageState extends State<StudentJobDetailPage> {
         final dateStr      = createdAt.length >= 10 ? createdAt.substring(0, 10) : createdAt;
 
         return Padding(
-          padding: EdgeInsets.only(left: depth * 16.0, bottom: 10),
+          padding: EdgeInsets.only(left: clampedDepth * 8.0, bottom: 8),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
-                padding: EdgeInsets.only(left: depth > 0 ? 8.0 : 0),
+                padding: EdgeInsets.only(left: depth > 0 ? 6.0 : 0),
                 decoration: BoxDecoration(
                   color: isReplyActive ? const Color(0xFFF0F4FF) : null,
                   border: depth > 0
                       ? const Border(
-                          left: BorderSide(color: Color(0xFFE0E0E0), width: 1))
+                          left: BorderSide(color: Color(0xFFF0F0F0), width: 1))
                       : null,
                 ),
                 child: Column(

@@ -82,8 +82,10 @@ class _BoardTabState extends State<BoardTab> {
     _carouselTimer = Timer.periodic(const Duration(seconds: 4), (_) {
       if (!mounted || _notices.isEmpty) return;
       final next = (_pageIndex + 1) % _notices.length;
-      _pageCtrl.animateToPage(next,
-          duration: const Duration(milliseconds: 400), curve: Curves.easeInOut);
+      if (_pageCtrl.hasClients) {
+        _pageCtrl.animateToPage(next,
+            duration: const Duration(milliseconds: 400), curve: Curves.easeInOut);
+      }
     });
   }
 
