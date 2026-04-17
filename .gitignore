@@ -50,3 +50,5 @@ functions/.env
 functions/.env.*
 functions/firebase-debug.log
 functions/firebase-debug.*.log
+/.firebase
+.firebaserc
