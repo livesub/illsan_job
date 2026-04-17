@@ -26,6 +26,7 @@ class _StudentJobDetailPageState extends State<StudentJobDetailPage> {
   final _db = FirebaseFirestore.instance;
 
   bool _hasApplied   = false;
+  bool _isApproved   = false; // 승인 완료 여부 — true면 취소·재지원 모두 차단
   bool _applyLoading = false;
   bool _checkLoading = true;
 
@@ -70,7 +71,7 @@ class _StudentJobDetailPageState extends State<StudentJobDetailPage> {
         .update({FsJob.viewCount: FieldValue.increment(1)});
   }
 
-  // 결정론적 ID 단건 조회 — 지원 여부 확인
+  // 결정론적 ID 단건 조회 — 지원 여부 + 승인 여부 동시 확인
   Future<void> _checkApplied() async {
     final doc = await _db
         .collection(FsCol.jobApplications)
@@ -79,8 +80,11 @@ class _StudentJobDetailPageState extends State<StudentJobDetailPage> {
     if (!mounted) return;
     final status = doc.data()?[FsJobApp.status] as String?;
     setState(() {
+      // pending·approved 모두 '지원함' 으로 간주
       _hasApplied = status == FsJobApp.statusPending ||
           status == FsJobApp.statusApproved;
+      // 승인 완료 상태면 취소·재지원 불가 플래그 설정
+      _isApproved   = status == FsJobApp.statusApproved;
       _checkLoading = false;
     });
   }
@@ -915,16 +919,49 @@ class _StudentJobDetailPageState extends State<StudentJobDetailPage> {
     );
   }
 
-  // 지원 버튼 (지원 이력 확인 후 분기)
+  // 지원 버튼 (지원 이력·승인 여부 확인 후 분기)
   Widget _buildApplyButton() {
+    // 지원 이력 조회 중 — 로딩 표시
     if (_checkLoading) {
       return const SizedBox(
         width: double.infinity,
-        height: 56, 
+        height: 56,
         child: Center(child: CircularProgressIndicator()),
       );
     }
-    
+
+    // 승인 완료 상태 — 버튼 비활성화 + 안내 문구 표시
+    if (_isApproved) {
+      return Semantics(
+        label: '이미 승인된 지원입니다. 재지원 불가',
+        button: false,
+        child: SizedBox(
+          width: double.infinity,
+          height: 56,
+          child: ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF2E7D32), // 승인 = 초록
+              foregroundColor: Colors.white,
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14)),
+            ),
+            onPressed: null, // 비활성화 — 재지원·취소 모두 차단
+            child: const Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.check_circle_outline_rounded, size: 20),
+                SizedBox(width: 8),
+                Text('이미 승인된 지원입니다',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    // 일반 상태 — 지원하기 / 신청 취소 분기
     return Semantics(
       label: _hasApplied ? '신청 취소 버튼' : '지원하기 버튼',
       button: true,

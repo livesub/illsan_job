@@ -1,16 +1,60 @@
-# illsan_job
+🔗 프로젝트 접속 경로: https://illsan-job.web.app/
+📚 학원/교육 관리 및 구직 매칭 시스템 (LMS & Job Matching)
+이 프로젝트는 플러터(Flutter)와 파이어베이스(Firebase)를 이용하여 개발된 종합 교육 및 구직 관리 시스템입니다. 최고 관리자, 교사, 학생 등 권한(Role)에 따라 완벽하게 분리된 맞춤형 화면과 철저한 보안 라우팅을 제공하며, 학원의 전반적인 강좌 운영부터 학생들의 구직 활동 지원까지 원스톱으로 관리할 수 있도록 설계되었습니다.
 
-A new Flutter project.
+🛠 기술 스택 (Tech Stack)
+Frontend: Flutter (Mobile & Web 완벽 호환, 라우터 및 상태 관리 적용)
 
-## Getting Started
+Backend: Firebase (Authentication, Firestore DB, Cloud Storage)
 
-This project is a starting point for a Flutter application.
+Cloud & Serverless: Firebase Cloud Functions (FCM 푸시 알림, 백엔드 API 연동), Pub/Sub 스케줄러(Cron Job)
 
-A few resources to get you started if this is your first Flutter project:
+🏗 핵심 아키텍처 및 보안 정책 (Core Architecture & Security)
+본 프로젝트는 데이터의 무결성과 시스템 보안을 위해 아래와 같은 엄격한 개발 원칙을 따릅니다.
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+코드키(Enum) 기반 권한 관리: 한글 하드코딩을 배제하고 SUPER_ADMIN, INSTRUCTOR, STUDENT 영문 상수(Enum)를 통해 프론트엔드의 화면 렌더링과 접근 권한을 제어합니다.
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+철통 라우팅 가드 (Route Guard): 비정상적인 URL 접근이나 권한 밖의 페이지 접근 시, 즉시 차단하고 "권한이 없습니다"라는 메시지와 함께 로그인 화면 또는 본인 권한에 맞는 대시보드로 강제 튕겨내는 방어벽이 구축되어 있습니다.
+
+Clean Server 정책 (완벽한 파일 관리): 파이어베이스 스토리지(Storage) 낭비를 막기 위해, 게시물 수정 및 삭제 시 사용되지 않는 기존 이미지 및 첨부파일은 서버에서 물리적으로 완전히 삭제(Hard Delete) 합니다.
+
+데이터 미아 방지 및 Soft Delete: 교사나 게시글을 삭제할 때 연관된 데이터(예: 수강 중인 학생, 대댓글 등)가 꼬이지 않도록 DB 상에서는 상태값만 변경(Soft Delete)하고 프론트엔드에서 노출을 가리는 방식을 혼용하여 데이터 연속성을 보장합니다.
+
+👥 사용자 권한별 주요 기능 (Features by Role)
+1. 👑 최고 관리자 (Super Admin)
+시스템을 총괄하는 최고 관리자이며, 개발자가 수동으로 파이어베이스 콘솔에서 최초 계정을 생성하여 진입합니다 (가입 화면 없음).
+
+전체 통계 대시보드: 접속 즉시 활동 중인 교사 수, 진행 중인 강좌 수, 전체 누적 수강생 수를 한눈에 파악할 수 있습니다.
+
+교사 관리 및 강제 퇴직 방어 로직: 교사를 삭제하려 할 때, 해당 교사가 진행 중인 강좌나 승인 대기 중인 학생이 있으면 삭제를 즉시 차단합니다.
+
+원클릭 인수인계: 위 상황 발생 시, [중도 퇴직 인수인계 팝업]을 통해 다른 활성 교사에게 학생과 반을 트랜잭션(Transaction)으로 안전하게 이관하고 기존 교사의 계정을 비활성화합니다.
+
+강좌 개설 및 라이프사이클 관리: 스마트 에디터를 활용해 강좌를 개설하며, 매일 자정 스케줄러(Cron Job)가 작동해 종료일이 지난 강좌는 자동으로 '종료(closed)' 처리됩니다.
+
+전체 권한 통제: 학생 회원 정보를 조회할 수 있으나 교사의 고유 권한 보호를 위해 학생 데이터의 임의 수정 및 삭제는 불가능합니다.
+
+2. 👨‍🏫 교사 (Instructor)
+담당 학급의 학생들을 관리하고, 구직 정보를 올려 학생들의 취업을 돕는 핵심 운영자입니다.
+
+스마트 대시보드: 본인이 담당하는 진행 중(active)인 반 목록과 총 학생 수, 가입 승인 대기 리스트, 구직 신청 관리 내역을 탭(Tab) UI로 한눈에 확인하고 즉각 처리할 수 있습니다.
+
+학생 가입 승인/거절: 학생의 가입 요청을 확인하고 배정 반을 수정하여 승인하거나, 거절 시 DB에서 물리적으로 완벽히 삭제합니다.
+
+임시 비밀번호 발급: 비밀번호를 잊은 학생(이메일 직접 가입자 한정)을 위해, 환경변수(.env)에 설정된 임시 비밀번호를 파이어베이스에 업데이트하고 원클릭 복사 기능으로 쉽게 전달할 수 있습니다.
+
+구직 공고 등록 및 관리: 스마트 에디터를 사용하여 공고를 작성하며, 담당 학급 전체 또는 특정 반을 타겟팅하여 구직 공고를 노출할 수 있습니다. 웹 크래시 방지를 위해 파일 용량은 cross_file 등을 사용해 3MB로 엄격히 제한합니다.
+
+3. 🎓 학생 (Student)
+철저한 상태값(Status) 관리를 통해 현재 수강 중인 과정을 확인하고, 구직 활동과 Q&A에 참여합니다.
+
+상태별 철통 라우팅 (Status Routing): 로그인 후 학생의 상태가 '승인 대기(pending)'면 대기 화면으로, '진행 중(active)'이면 메인 대시보드로, '수료/퇴소(graduated/dropped)' 상태면 새로운 과정을 재신청하는 화면으로만 강제 이동시켜 혼선을 막습니다.
+
+구직 리스트 및 무한 스크롤: 교사가 올린 구직 리스트를 15개씩 무한 스크롤로 끊김 없이 탐색하고 원클릭으로 지원할 수 있습니다.
+
+계층형 Q&A (묻고 답하기): 구직 공고 상세 페이지 하단에서 계층형 대댓글 기능을 통해 교사와 소통합니다. 개인정보 보호를 위해 이메일 앞 4자리 외에는 마스킹(***) 처리됩니다.
+
+4. 📢 공통 시스템: 푸시 알림 및 공지사항 (Notice & FCM Push)
+타겟팅 푸시 알림: 전체 공지뿐만 아니라, 교사가 특정 담당 반 학생들만 지정하여 공지를 올릴 수 있습니다.
+
+클라우드 함수 연동: 공지사항 등록 시 파이어베이스 클라우드 함수(Cloud Functions)가 트리거되어 타겟 사용자들의 단말기 토큰(FCM)을 수집하고 백그라운드에서 즉시 스마트폰 푸시 알림을 발송합니다.
