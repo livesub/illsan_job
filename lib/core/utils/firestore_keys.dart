@@ -276,6 +276,7 @@ class FsJobComment {
   static const String authorId    = 'author_id';
   static const String authorName  = 'author_name';
   static const String authorEmail = 'author_email'; // 닉네임 마스킹용
+  static const String authorRole  = 'author_role';  // 'STUDENT' | 'INSTRUCTOR' | 'SUPER_ADMIN'
   static const String parentId    = 'parent_id';
   static const String isDeleted   = 'is_deleted';
   static const String createdAt   = 'created_at';

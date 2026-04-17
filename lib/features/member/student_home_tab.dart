@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/firestore_keys.dart';
 import 'student_job_detail_page.dart';
+import 'student_my_page.dart';
 
 // 학생 대시보드 홈 탭
 // 구성: 인사말 헤더 → 임시PW 경고 → 퀵 통계 → 공지 롤링 → 구직 무한스크롤 목록
@@ -300,6 +302,86 @@ class _StudentHomeTabState extends State<StudentHomeTab> {
     );
   }
 
+  // Quill Delta JSON → 평문 변환
+  static String _extractPlainText(String raw) {
+    try {
+      final ops = jsonDecode(raw) as List;
+      final buf = StringBuffer();
+      for (final op in ops) {
+        final insert = (op as Map)['insert'];
+        if (insert is String) buf.write(insert);
+      }
+      return buf.toString().trim();
+    } catch (_) {
+      return raw.replaceAll(RegExp(r'<[^>]*>'), '').trim();
+    }
+  }
+
+  void _openNoticeDetail(QueryDocumentSnapshot doc) {
+    final data    = doc.data() as Map<String, dynamic>;
+    final title   = data[FsNotice.title]      as String? ?? '-';
+    final author  = data[FsNotice.authorName] as String? ?? '-';
+    final created = data[FsNotice.createdAt]  as String? ?? '';
+    final content = data[FsNotice.content]    as String? ?? '';
+    final plain   = _extractPlainText(content);
+
+    String dateStr = created;
+    if (created.length >= 6) {
+      dateStr = '20${created.substring(0, 2)}-${created.substring(2, 4)}-${created.substring(4, 6)}';
+    }
+
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        titlePadding: EdgeInsets.zero,
+        title: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+          decoration: const BoxDecoration(
+            color: AppColors.primary,
+            borderRadius: BorderRadius.only(
+                topLeft: Radius.circular(16), topRight: Radius.circular(16)),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.campaign_rounded, color: Colors.white, size: 20),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(title,
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700)),
+              ),
+            ],
+          ),
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('$author · $dateStr',
+                  style: const TextStyle(
+                      fontSize: 12, color: AppColors.textSecondary)),
+              const Divider(height: 20),
+              Text(plain,
+                  style: const TextStyle(
+                      fontSize: 14,
+                      height: 1.7,
+                      color: AppColors.textPrimary)),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('닫기'),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _openDetail(QueryDocumentSnapshot doc) {
     // 👈 플러터 웹의 마우스 추적기 충돌 버그를 우회하기 위해,
     // MaterialPageRoute 대신 PageRouteBuilder를 사용하여 애니메이션 시간을 '0'으로 만듭니다.
@@ -323,11 +405,17 @@ class _StudentHomeTabState extends State<StudentHomeTab> {
       label: '소속 반 $course, ${widget.userName}님. 마이페이지로 이동합니다.',
       button: true,
       child: GestureDetector(
-        onTap: () => ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text('마이페이지는 준비 중입니다.'),
-              duration: Duration(seconds: 2)),
-        ),
+        onTap: () => Navigator.push(
+          context,
+          PageRouteBuilder(
+            pageBuilder: (_, __, ___) => const StudentMyPage(),
+            transitionDuration: Duration.zero,
+            reverseTransitionDuration: Duration.zero,
+          ),
+        ).then((_) async {
+          await _loadUserInfo();
+          if (mounted) setState(() {});
+        }),
         child: Container(
           width: double.infinity,
           padding: const EdgeInsets.all(20),
@@ -461,35 +549,39 @@ class _StudentHomeTabState extends State<StudentHomeTab> {
               final title =
                   ((_notices[i].data() as Map<String, dynamic>)[FsNotice.title] as String?) ?? '-';
               return Semantics(
-                label: '공지사항 ${i + 1}번: $title',
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(14, 14, 14, 26),
-                  child: Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: AppColors.primary,
-                          borderRadius: BorderRadius.circular(6),
+                label: '공지사항 ${i + 1}번: $title. 탭하면 상세 내용을 봅니다.',
+                button: true,
+                child: GestureDetector(
+                  onTap: () => _openNoticeDetail(_notices[i]),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(14, 14, 14, 26),
+                    child: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: AppColors.primary,
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: const Text('공지',
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700)),
                         ),
-                        child: const Text('공지',
-                            style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w700)),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(title,
-                            style: const TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                                color: AppColors.textPrimary),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis),
-                      ),
-                    ],
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(title,
+                              style: const TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.textPrimary),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               );

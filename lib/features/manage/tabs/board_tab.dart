@@ -8,11 +8,13 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../../../core/enums/user_role.dart';
 import '../../../core/utils/auth_service.dart';
 import '../../../core/utils/firestore_keys.dart';
+import '../../member/student_job_detail_page.dart';
 
 class BoardTab extends StatefulWidget {
   final UserRole userRole;
   final String userName;
-  const BoardTab({super.key, required this.userRole, required this.userName});
+  final bool showNotices;
+  const BoardTab({super.key, required this.userRole, required this.userName, this.showNotices = true});
 
   @override
   State<BoardTab> createState() => _BoardTabState();
@@ -124,7 +126,7 @@ class _BoardTabState extends State<BoardTab> {
       slivers: [
         const SliverToBoxAdapter(child: SizedBox(height: 20)),
         // 공지사항 캐러셀
-        if (_notices.isNotEmpty)
+        if (widget.showNotices && _notices.isNotEmpty)
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -274,11 +276,10 @@ class _BoardTabState extends State<BoardTab> {
     Navigator.push(
       context,
       PageRouteBuilder(
-        pageBuilder: (context, animation, secondaryAnimation) => _JobDetailPage(
-          jobDoc: doc,
-          userRole: widget.userRole,
-          currentUid: _uid,
-        ),
+        pageBuilder: (context, animation, secondaryAnimation) =>
+            widget.userRole == UserRole.STUDENT
+                ? StudentJobDetailPage(jobDoc: doc, currentUid: _uid)
+                : _JobDetailPage(jobDoc: doc, userRole: widget.userRole, currentUid: _uid),
         transitionDuration: Duration.zero,
         reverseTransitionDuration: Duration.zero,
       ),
@@ -664,7 +665,8 @@ class _CommentSectionState extends State<_CommentSection> {
         FsJobComment.content:     text,
         FsJobComment.authorId:    widget.currentUid,
         FsJobComment.authorName:  user?.name  ?? '',
-        FsJobComment.authorEmail: user?.email ?? '', // 마스킹 표시용
+        FsJobComment.authorEmail: user?.email ?? '',
+        FsJobComment.authorRole:  widget.userRole.code,
         FsJobComment.parentId:    null,
         FsJobComment.isDeleted:   false,
         FsJobComment.createdAt:   StoragePath.nowCreatedAt(),

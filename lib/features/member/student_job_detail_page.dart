@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -28,11 +29,11 @@ class _StudentJobDetailPageState extends State<StudentJobDetailPage> {
   bool _applyLoading = false;
   bool _checkLoading = true;
 
-  // 댓글 입력 컨트롤러 / 포커스노드 / 대댓글 대상 상태
+  // 댓글 입력 컨트롤러 / 포커스노드 / 인라인 대댓글 상태
   final _commentCtrl      = TextEditingController();
-  final _commentFocusNode = FocusNode(); // StreamBuilder 리빌드 시 포커스 유지
-  String? _replyToId;
-  String? _replyToAuthor;
+  final _replyCtrl        = TextEditingController();
+  final _commentFocusNode = FocusNode();
+  String? _activeReplyId; // 인라인 대댓글 입력 중인 부모 댓글 ID
   bool _commentLoading = false;
 
   // 스트림을 build() 밖에서 1회만 생성 — 재구독으로 인한 레이아웃 미완료 hit-test 버그 방지
@@ -44,6 +45,7 @@ class _StudentJobDetailPageState extends State<StudentJobDetailPage> {
   @override
   void dispose() {
     _commentCtrl.dispose();
+    _replyCtrl.dispose();
     _commentFocusNode.dispose();
     super.dispose();
   }
@@ -51,10 +53,10 @@ class _StudentJobDetailPageState extends State<StudentJobDetailPage> {
   @override
   void initState() {
     super.initState();
+    // orderBy 제거 — where+orderBy 복합 인덱스 없이도 동작하도록 클라이언트 정렬로 전환
     _commentStream = _db
         .collection(FsCol.jobComments)
         .where(FsJobComment.jobId, isEqualTo: widget.jobDoc.id)
-        .orderBy(FsJobComment.createdAt)
         .snapshots();
     _incrementViewCount();
     _checkApplied();
@@ -199,9 +201,7 @@ class _StudentJobDetailPageState extends State<StudentJobDetailPage> {
     final content     = data[FsJob.content]      as String? ?? '';
     // final attachments =
     //     List<String>.from(data[FsJob.attachments] as List? ?? []); // 차후 개발
-    // HTML 태그 제거 후 평문 표시
-    final plainText =
-        content.replaceAll(RegExp(r'<[^>]*>'), '').trim();
+    final plainText = _extractPlainText(content);
 
     return Scaffold(
       backgroundColor: const Color(0xFFF4F6FA),
@@ -405,6 +405,21 @@ class _StudentJobDetailPageState extends State<StudentJobDetailPage> {
   //   );
   // }
 
+  // Quill Delta JSON → 평문 변환
+  static String _extractPlainText(String raw) {
+    try {
+      final ops = jsonDecode(raw) as List;
+      final buf = StringBuffer();
+      for (final op in ops) {
+        final insert = (op as Map)['insert'];
+        if (insert is String) buf.write(insert);
+      }
+      return buf.toString().trim();
+    } catch (_) {
+      return raw.replaceAll(RegExp(r'<[^>]*>'), '').trim();
+    }
+  }
+
   // 이메일 앞 4자 노출, 나머지 마스킹
   String _maskEmail(String email) {
     final parts = email.split('@');
@@ -425,7 +440,7 @@ class _StudentJobDetailPageState extends State<StudentJobDetailPage> {
     return snap.docs.isNotEmpty;
   }
 
-  // 댓글/대댓글 등록
+  // 최상위 댓글 등록
   Future<void> _addComment() async {
     final text = _commentCtrl.text.trim();
     if (text.isEmpty) return;
@@ -439,15 +454,46 @@ class _StudentJobDetailPageState extends State<StudentJobDetailPage> {
         FsJobComment.authorId:    widget.currentUid,
         FsJobComment.authorName:  userData[FsUser.name]  ?? '',
         FsJobComment.authorEmail: userData[FsUser.email] ?? '',
-        FsJobComment.parentId:    _replyToId,
+        FsJobComment.authorRole:  'STUDENT',
+        FsJobComment.parentId:    null,
         FsJobComment.isDeleted:   false,
         FsJobComment.createdAt:   StoragePath.nowCreatedAt(),
       });
       if (!mounted) return;
       _commentCtrl.clear();
+      setState(() => _commentLoading = false);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _commentLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('등록 실패: $e'), backgroundColor: Colors.red),
+      );
+    }
+  }
+
+  // 인라인 대댓글 등록
+  Future<void> _addReply(String parentId) async {
+    final text = _replyCtrl.text.trim();
+    if (text.isEmpty) return;
+    setState(() => _commentLoading = true);
+    try {
+      final userDoc  = await _db.collection(FsCol.users).doc(widget.currentUid).get();
+      final userData = userDoc.data() ?? {};
+      await _db.collection(FsCol.jobComments).add({
+        FsJobComment.jobId:       widget.jobDoc.id,
+        FsJobComment.content:     text,
+        FsJobComment.authorId:    widget.currentUid,
+        FsJobComment.authorName:  userData[FsUser.name]  ?? '',
+        FsJobComment.authorEmail: userData[FsUser.email] ?? '',
+        FsJobComment.authorRole:  'STUDENT',
+        FsJobComment.parentId:    parentId,
+        FsJobComment.isDeleted:   false,
+        FsJobComment.createdAt:   StoragePath.nowCreatedAt(),
+      });
+      if (!mounted) return;
+      _replyCtrl.clear();
       setState(() {
-        _replyToId      = null;
-        _replyToAuthor  = null;
+        _activeReplyId  = null;
         _commentLoading = false;
       });
     } catch (e) {
@@ -459,7 +505,7 @@ class _StudentJobDetailPageState extends State<StudentJobDetailPage> {
     }
   }
 
-  // Soft Delete — content 교체 + is_deleted=true (물리 삭제 금지)
+  // 하위 답변 있으면 Soft Delete, 없으면 Hard Delete
   Future<void> _deleteComment(String commentId) async {
     final confirm = await showDialog<bool>(
       context: context,
@@ -480,10 +526,15 @@ class _StudentJobDetailPageState extends State<StudentJobDetailPage> {
       ),
     );
     if (confirm != true) return;
-    await _db.collection(FsCol.jobComments).doc(commentId).update({
-      FsJobComment.content:   FsJobComment.deletedText,
-      FsJobComment.isDeleted: true,
-    });
+    final hasReplies = await _checkHasReplies(commentId);
+    if (hasReplies) {
+      await _db.collection(FsCol.jobComments).doc(commentId).update({
+        FsJobComment.content:   FsJobComment.deletedText,
+        FsJobComment.isDeleted: true,
+      });
+    } else {
+      await _db.collection(FsCol.jobComments).doc(commentId).delete();
+    }
   }
 
   // 수정 — 대댓글 1개 이상 존재 시 완벽 차단
@@ -529,8 +580,7 @@ class _StudentJobDetailPageState extends State<StudentJobDetailPage> {
     });
   }
 
-  // Q&A 섹션 — StreamBuilder 실시간
-  // Q&A 섹션 — 입력창은 StreamBuilder 외부 독립 배치 (포커스 유지)
+  // Q&A 섹션 — 루트 입력창 + StreamBuilder (인라인 대댓글 포함)
   Widget _buildCommentSection() {
     return Container(
       width: double.infinity,
@@ -548,45 +598,13 @@ class _StudentJobDetailPageState extends State<StudentJobDetailPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 타이틀
           const Text('Q&A',
               style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w700,
                   color: AppColors.textPrimary)),
           const Divider(height: 20),
-          // 대댓글 배너 — StreamBuilder 외부
-          if (_replyToAuthor != null)
-            Container(
-              margin: const EdgeInsets.only(bottom: 8),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                color: AppColors.primary.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      '$_replyToAuthor 님에게 대댓글 작성 중',
-                      style: const TextStyle(fontSize: 12, color: AppColors.primary),
-                    ),
-                  ),
-                  Semantics(
-                    label: '대댓글 작성 취소 버튼',
-                    button: true,
-                    child: GestureDetector(
-                      onTap: () => setState(() {
-                        _replyToId     = null;
-                        _replyToAuthor = null;
-                      }),
-                      child: const Icon(Icons.close, size: 16, color: AppColors.primary),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          // 입력창 — StreamBuilder 외부 독립 배치 (리빌드 시 포커스 유지)
+          // 루트 댓글 입력창 — StreamBuilder 외부 독립 배치
           Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
@@ -600,10 +618,8 @@ class _StudentJobDetailPageState extends State<StudentJobDetailPage> {
                   decoration: InputDecoration(
                     hintText: '댓글을 입력하세요.',
                     hintStyle: const TextStyle(fontSize: 13),
-                    contentPadding:
-                        const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                    border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10)),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
                     enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
                       borderSide: const BorderSide(color: Color(0xFFE0E0E0)),
@@ -624,62 +640,59 @@ class _StudentJobDetailPageState extends State<StudentJobDetailPage> {
                     minimumSize: const Size(0, 48),
                     backgroundColor: AppColors.primary,
                     foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 14, vertical: 14),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10)),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                     elevation: 0,
                   ),
                   onPressed: _commentLoading ? null : _addComment,
                   child: _commentLoading
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(
-                              strokeWidth: 2, color: Colors.white))
-                      : const Text('등록',
-                          style: TextStyle(
-                              fontSize: 13, fontWeight: FontWeight.w600)),
+                      ? const SizedBox(width: 18, height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                      : const Text('등록', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
                 ),
               ),
             ],
           ),
-          // 댓글 목록 — StreamBuilder (입력창과 분리)
+          // 댓글 목록 — StreamBuilder
           StreamBuilder<QuerySnapshot>(
             stream: _commentStream,
             builder: (context, snap) {
-              final docs    = snap.data?.docs ?? [];
-              final parents = docs.where((d) {
-                return (d.data() as Map<String, dynamic>)[FsJobComment.parentId] == null;
-              }).toList();
-              final replies = docs.where((d) {
-                return (d.data() as Map<String, dynamic>)[FsJobComment.parentId] != null;
-              }).toList();
-              if (parents.isEmpty) {
+              if (snap.connectionState == ConnectionState.waiting && !snap.hasData) {
+                return const Padding(
+                  padding: EdgeInsets.only(top: 16),
+                  child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+                );
+              }
+              if (snap.hasError) {
+                debugPrint('[Q&A] 스트림 에러: ${snap.error}');
+                return Padding(
+                  padding: const EdgeInsets.only(top: 16),
+                  child: Text('댓글을 불러올 수 없습니다. (${snap.error})',
+                      style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+                );
+              }
+              // createdAt 기준 클라이언트 정렬
+              final docs = List<QueryDocumentSnapshot>.of(
+                  snap.data?.docs ?? const <QueryDocumentSnapshot>[])
+                ..sort((a, b) {
+                  final ad = (a.data() as Map)[FsJobComment.createdAt] as String? ?? '';
+                  final bd = (b.data() as Map)[FsJobComment.createdAt] as String? ?? '';
+                  return ad.compareTo(bd);
+                });
+              final hasRoot = docs.any((d) =>
+                  (d.data() as Map)[FsJobComment.parentId] == null);
+              if (!hasRoot) {
                 return const Padding(
                   padding: EdgeInsets.only(top: 16),
                   child: Text('첫 댓글을 남겨보세요.',
-                      style: TextStyle(
-                          fontSize: 13, color: AppColors.textSecondary)),
+                      style: TextStyle(fontSize: 13, color: AppColors.textSecondary)),
                 );
               }
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Divider(height: 24),
-                  ...parents.map((parentDoc) {
-                    final parentData = parentDoc.data() as Map<String, dynamic>;
-                    final childDocs  = replies.where((r) {
-                      final rd = r.data() as Map<String, dynamic>;
-                      return rd[FsJobComment.parentId] == parentDoc.id;
-                    }).toList();
-                    return _buildCommentItem(
-                      doc: parentDoc,
-                      data: parentData,
-                      isReply: false,
-                      childDocs: childDocs,
-                    );
-                  }),
+                  _buildCommentNode(null, docs, 0),
                 ],
               );
             },
@@ -689,128 +702,212 @@ class _StudentJobDetailPageState extends State<StudentJobDetailPage> {
     );
   }
 
-  Widget _buildCommentItem({
-    required QueryDocumentSnapshot doc,
-    required Map<String, dynamic> data,
-    required bool isReply,
-    List<QueryDocumentSnapshot> childDocs = const [],
-  }) {
-    final isDeleted   = data[FsJobComment.isDeleted]   as bool?   ?? false;
-    final content     = data[FsJobComment.content]     as String? ?? '';
-    final authorId    = data[FsJobComment.authorId]    as String? ?? '';
-    final authorName  = data[FsJobComment.authorName]  as String? ?? '';
-    final authorEmail = data[FsJobComment.authorEmail] as String? ?? '';
-    final isOwn       = authorId == widget.currentUid;
-    final maskedEmail = _maskEmail(authorEmail);
+  Widget _buildCommentNode(
+      String? parentId, List<QueryDocumentSnapshot> all, int depth) {
+    final children = all
+        .where((d) => (d.data() as Map)[FsJobComment.parentId] == parentId)
+        .toList();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: children.map((doc) {
+        final data         = doc.data() as Map<String, dynamic>;
+        final isDeleted    = data[FsJobComment.isDeleted]  as bool?   ?? false;
+        final content      = data[FsJobComment.content]    as String? ?? '';
+        final authorId     = data[FsJobComment.authorId]   as String? ?? '';
+        final authorName   = data[FsJobComment.authorName] as String? ?? '';
+        final authorRole   = (data[FsJobComment.authorRole] as String? ?? '').toUpperCase();
+        final createdAt    = data[FsJobComment.createdAt]  as String? ?? '';
+        final isInstructor = authorRole == 'INSTRUCTOR' || authorRole == 'SUPER_ADMIN'
+            || authorRole == 'TEACHER';
+        final isOwn        = authorId == widget.currentUid;
+        final displayName  = isInstructor ? '$authorName(교사)' : authorName;
+        final isReplyActive = _activeReplyId == doc.id;
+        final dateStr      = createdAt.length >= 10 ? createdAt.substring(0, 10) : createdAt;
 
-    return Padding(
-      padding: EdgeInsets.only(left: isReply ? 24 : 0, bottom: 10),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // 작성자 행
-          Row(
+        return Padding(
+          padding: EdgeInsets.only(left: depth * 16.0, bottom: 10),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(
-                isReply
-                    ? Icons.subdirectory_arrow_right_rounded
-                    : Icons.chat_bubble_outline_rounded,
-                size: 14,
-                color: AppColors.primary,
-              ),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  '$authorName ($maskedEmail)',
-                  style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.textSecondary),
-                  overflow: TextOverflow.ellipsis,
+              Container(
+                padding: EdgeInsets.only(left: depth > 0 ? 8.0 : 0),
+                decoration: BoxDecoration(
+                  color: isReplyActive ? const Color(0xFFF0F4FF) : null,
+                  border: depth > 0
+                      ? const Border(
+                          left: BorderSide(color: Color(0xFFE0E0E0), width: 1))
+                      : null,
                 ),
-              ),
-              if (isOwn && !isDeleted) ...[
-                Semantics(
-                  label: '댓글 수정 버튼',
-                  button: true,
-                  child: InkWell(
-                    onTap: () => _editComment(doc.id, content),
-                    child: const Padding(
-                      padding:
-                          EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                      child: Text('수정',
-                          style: TextStyle(
-                              fontSize: 11, color: AppColors.primary)),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Row(
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  displayName,
+                                  style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: AppColors.textSecondary),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              if (dateStr.isNotEmpty) ...[
+                                const SizedBox(width: 6),
+                                Text(dateStr,
+                                    style: const TextStyle(
+                                        fontSize: 10, color: Color(0xFFBDBDBD))),
+                              ],
+                            ],
+                          ),
+                        ),
+                        if (isOwn && !isDeleted) ...[
+                          Semantics(
+                            label: '댓글 수정 버튼',
+                            button: true,
+                            child: InkWell(
+                              onTap: () => _editComment(doc.id, content),
+                              child: const Padding(
+                                padding: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                                child: Text('수정',
+                                    style: TextStyle(fontSize: 11, color: AppColors.primary)),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 2),
+                          Semantics(
+                            label: '댓글 삭제 버튼',
+                            button: true,
+                            child: InkWell(
+                              onTap: () => _deleteComment(doc.id),
+                              child: const Padding(
+                                padding: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                                child: Text('삭제',
+                                    style: TextStyle(fontSize: 11, color: Colors.red)),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
-                  ),
-                ),
-                const SizedBox(width: 2),
-                Semantics(
-                  label: '댓글 삭제 버튼',
-                  button: true,
-                  child: InkWell(
-                    onTap: () => _deleteComment(doc.id),
-                    child: const Padding(
-                      padding:
-                          EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                      child: Text('삭제',
-                          style:
-                              TextStyle(fontSize: 11, color: Colors.red)),
+                    const SizedBox(height: 4),
+                    Text(
+                      content,
+                      style: TextStyle(
+                        fontSize: 13,
+                        height: 1.5,
+                        color: isDeleted ? AppColors.textSecondary : AppColors.textPrimary,
+                        fontStyle: isDeleted ? FontStyle.italic : FontStyle.normal,
+                      ),
                     ),
-                  ),
+                    if (!isDeleted)
+                      isReplyActive
+                          ? _buildInlineReplyInput(doc.id)
+                          : Semantics(
+                              label: '답글 달기 버튼',
+                              button: true,
+                              child: TextButton.icon(
+                                style: ButtonStyle(
+                                  foregroundColor: WidgetStateProperty.resolveWith((s) =>
+                                      s.contains(WidgetState.hovered) ||
+                                              s.contains(WidgetState.pressed)
+                                          ? AppColors.primary
+                                          : const Color(0xFFBDBDBD)),
+                                  minimumSize: WidgetStateProperty.all(Size.zero),
+                                  padding: WidgetStateProperty.all(
+                                      const EdgeInsets.symmetric(
+                                          horizontal: 0, vertical: 4)),
+                                  overlayColor:
+                                      WidgetStateProperty.all(Colors.transparent),
+                                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                ),
+                                onPressed: () {
+                                  _replyCtrl.clear();
+                                  setState(() => _activeReplyId = doc.id);
+                                },
+                                icon: const Icon(Icons.reply_rounded, size: 13),
+                                label: const Text('답글',
+                                    style: TextStyle(fontSize: 11)),
+                              ),
+                            ),
+                  ],
                 ),
-              ],
+              ),
+              _buildCommentNode(doc.id, all, depth + 1),
+              if (depth == 0) const Divider(height: 16),
             ],
           ),
-          const SizedBox(height: 4),
-          // 본문
-          Text(
-            content,
-            style: TextStyle(
-              fontSize: 13,
-              height: 1.5,
-              color: isDeleted
-                  ? AppColors.textSecondary
-                  : AppColors.textPrimary,
-              fontStyle:
-                  isDeleted ? FontStyle.italic : FontStyle.normal,
-            ),
-          ),
-          // 대댓글 버튼 (최상위 + 미삭제 댓글만)
-          if (!isReply && !isDeleted)
-            Semantics(
-              label: '대댓글 작성 버튼',
-              button: true,
-              child: GestureDetector(
-                onTap: () => setState(() {
-                  _replyToId     = doc.id;
-                  _replyToAuthor = authorName;
-                }),
-                child: const Padding(
-                  padding: EdgeInsets.only(top: 4),
-                  child: Text('대댓글',
-                      style: TextStyle(
-                          fontSize: 11,
-                          color: AppColors.primary,
-                          fontWeight: FontWeight.w600)),
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildInlineReplyInput(String parentId) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 8, left: 16),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          const Icon(Icons.subdirectory_arrow_right_rounded,
+              size: 14, color: AppColors.primary),
+          const SizedBox(width: 6),
+          Expanded(
+            child: TextField(
+              controller: _replyCtrl,
+              autofocus: true,
+              maxLines: 2,
+              minLines: 1,
+              style: const TextStyle(fontSize: 13),
+              decoration: InputDecoration(
+                hintText: '대댓글을 입력하세요.',
+                hintStyle: const TextStyle(fontSize: 13),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: const BorderSide(color: Color(0xFFE0E0E0)),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: const BorderSide(color: AppColors.primary),
                 ),
               ),
             ),
-          // 대댓글 목록
-          if (childDocs.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Column(
-                children: childDocs
-                    .map((replyDoc) => _buildCommentItem(
-                          doc: replyDoc,
-                          data: replyDoc.data() as Map<String, dynamic>,
-                          isReply: true,
-                        ))
-                    .toList(),
+          ),
+          const SizedBox(width: 6),
+          Semantics(
+            label: '대댓글 등록 버튼',
+            button: true,
+            child: ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                minimumSize: const Size(0, 36),
+                backgroundColor: AppColors.primary,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                elevation: 0,
               ),
+              onPressed: _commentLoading ? null : () => _addReply(parentId),
+              child: const Text('등록', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
             ),
-          const Divider(height: 16),
+          ),
+          const SizedBox(width: 4),
+          Semantics(
+            label: '대댓글 취소 버튼',
+            button: true,
+            child: TextButton(
+              style: TextButton.styleFrom(
+                minimumSize: const Size(0, 36),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+              ),
+              onPressed: () => setState(() => _activeReplyId = null),
+              child: const Text('취소', style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+            ),
+          ),
         ],
       ),
     );
