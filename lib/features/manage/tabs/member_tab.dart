@@ -32,11 +32,9 @@ class _MemberTabState extends State<MemberTab> {
   String _teacherCourseFilter = '전체';
   int _teacherPage = 1;
 
-  // ── 학생 탭 (Firestore 커서 페이징) ─────────────────────────
-  List<QueryDocumentSnapshot> _students = [];
+  // ── 학생 탭 (클라이언트 사이드 필터+페이징) ─────────────────────────
+  List<QueryDocumentSnapshot> _allStudents = []; // Firestore에서 받은 전체 학생
   bool _studentsLoading = false;
-  bool _studentHasMore = false;
-  final List<DocumentSnapshot?> _studentCursors = [null];
   int _studentPage = 1;
   final TextEditingController _studentSearchCtrl = TextEditingController();
   String _studentCourseFilter = '전체';
@@ -46,8 +44,8 @@ class _MemberTabState extends State<MemberTab> {
     super.initState();
     // 교사 검색: 클라이언트 필터 즉시 적용 (rebuild → getter 재계산)
     _teacherSearchCtrl.addListener(() => setState(() => _teacherPage = 1));
-    // 학생 검색: clear 버튼 표시용 rebuild만
-    _studentSearchCtrl.addListener(() => setState(() {}));
+    // 학생 검색: 실시간 필터 적용 (타이핑마다 _filteredStudents 재계산)
+    _studentSearchCtrl.addListener(() => setState(() => _studentPage = 1));
     _loadCourses();
     _loadTeachers();
     _loadStudents();
@@ -122,7 +120,7 @@ class _MemberTabState extends State<MemberTab> {
     return _allTeachers.where((doc) {
       final data = doc.data() as Map<String, dynamic>;
       final name = ((data[FsUser.name] as String?) ?? '').toLowerCase();
-      if (search.isNotEmpty && !name.startsWith(search)) return false;
+      if (search.isNotEmpty && !name.contains(search)) return false; // 부분 일치
       if (courseTeacherId != null) {
         if (courseTeacherId!.isEmpty || doc.id != courseTeacherId) return false;
       }
@@ -140,87 +138,57 @@ class _MemberTabState extends State<MemberTab> {
   bool get _teacherHasPrev => _teacherPage > 1;
   bool get _teacherHasMore => _teacherPage * _pageSize < _filteredTeachers.length;
 
-  // 강좌 선택 시 강좌 전체 로드 후 클라이언트 이름 필터+페이징,
-  // 전체 선택 시 Firestore 커서 페이징
+  // 전체 학생을 1회 로드 → 강좌·이름 필터는 _filteredStudents getter에서 클라이언트 처리
+  // (강좌별 Firestore 재조회 방식은 복합 인덱스 오류로 갱신 불가 문제 발생)
   Future<void> _loadStudents() async {
     setState(() => _studentsLoading = true);
     try {
-      final search   = _studentSearchCtrl.text.trim();
-      final hasCourse = _studentCourseFilter != '전체';
-      final hasSearch = search.isNotEmpty;
-
-      List<QueryDocumentSnapshot> pageDocs;
-      bool hasMore;
-
-      if (hasCourse) {
-        final snap = await FirebaseFirestore.instance
-            .collection(FsCol.users)
-            .where(FsUser.courseId, isEqualTo: _studentCourseFilter)
-            .orderBy(FsUser.name)
-            .get();
-        var docs = snap.docs.where((d) {
-          return (d.data() as Map<String, dynamic>)[FsUser.isDeleted] != true;
-        }).toList();
-        if (hasSearch) {
-          docs = docs.where((d) {
-            final n = ((d.data() as Map<String, dynamic>)[FsUser.name] as String? ?? '').toLowerCase();
-            return n.startsWith(search.toLowerCase());
-          }).toList();
-        }
-        final start = (_studentPage - 1) * _pageSize;
-        hasMore  = docs.length > start + _pageSize;
-        pageDocs = docs.sublist(start.clamp(0, docs.length), (start + _pageSize).clamp(0, docs.length));
-      } else {
-        Query query = FirebaseFirestore.instance
-            .collection(FsCol.users)
-            .where(FsUser.role, isEqualTo: FsUser.roleStudent);
-        if (hasSearch) {
-          query = query
-              .where(FsUser.name, isGreaterThanOrEqualTo: search)
-              .where(FsUser.name, isLessThanOrEqualTo: '$search\uf8ff');
-        }
-        query = query.orderBy(FsUser.name).limit(_pageSize + 1);
-        final cursor = _studentCursors[_studentPage - 1];
-        if (cursor != null) query = query.startAfterDocument(cursor);
-        final snap = await query.get();
-        final docs = snap.docs.where((d) {
-          return (d.data() as Map<String, dynamic>)[FsUser.isDeleted] != true;
-        }).toList();
-        hasMore  = docs.length > _pageSize;
-        pageDocs = hasMore ? docs.sublist(0, _pageSize) : docs;
-      }
-
+      final snap = await FirebaseFirestore.instance
+          .collection(FsCol.users)
+          .where(FsUser.role, isEqualTo: FsUser.roleStudent)
+          .orderBy(FsUser.name)
+          .get();
       if (!mounted) return;
       setState(() {
-        _students        = pageDocs;
-        _studentHasMore  = hasMore;
+        // isDeleted 제외한 전체 학생 보관 → 필터는 아래 getter에서 처리
+        _allStudents = snap.docs
+            .where((d) => (d.data() as Map<String, dynamic>)[FsUser.isDeleted] != true)
+            .toList();
         _studentsLoading = false;
       });
-    } catch (_) {
+    } catch (e) {
+      debugPrint('학생 목록 로드 실패: $e');
       if (mounted) setState(() => _studentsLoading = false);
     }
   }
 
-  void _resetStudentAndLoad() {
-    _studentCursors..clear()..add(null);
-    _studentPage = 1;
-    _loadStudents();
+  // 강좌 + 이름 동시 클라이언트 필터 (setState 호출 시 자동 재계산)
+  List<QueryDocumentSnapshot> get _filteredStudents {
+    final search = _studentSearchCtrl.text.trim().toLowerCase();
+    return _allStudents.where((doc) {
+      final data = doc.data() as Map<String, dynamic>;
+      final name = ((data[FsUser.name] as String?) ?? '').toLowerCase();
+
+      // ① 강좌 필터: '전체'면 통과, 특정 강좌 선택 시 courseId 일치 여부 확인
+      if (_studentCourseFilter != '전체') {
+        final courseId = (data[FsUser.courseId] as String?) ?? '';
+        if (courseId != _studentCourseFilter) return false;
+      }
+
+      // ② 이름 부분 일치 필터 (비어있으면 전체 통과)
+      return search.isEmpty || name.contains(search);
+    }).toList();
   }
 
-  void _studentNextPage() {
-    if (!_studentHasMore || _students.isEmpty) return;
-    if (_studentCourseFilter == '전체' && _studentCursors.length <= _studentPage) {
-      _studentCursors.add(_students.last);
-    }
-    setState(() => _studentPage++);
-    _loadStudents();
+  List<QueryDocumentSnapshot> get _pagedStudents {
+    final all = _filteredStudents;
+    final start = (_studentPage - 1) * _pageSize;
+    if (start >= all.length) return [];
+    return all.sublist(start, (start + _pageSize).clamp(0, all.length));
   }
 
-  void _studentPrevPage() {
-    if (_studentPage <= 1) return;
-    setState(() => _studentPage--);
-    _loadStudents();
-  }
+  bool get _studentHasPrev => _studentPage > 1;
+  bool get _studentHasMore => _studentPage * _pageSize < _filteredStudents.length;
 
   // settings/admin_config.temp_password를 읽어 학생 비밀번호 초기화합니다.
   // Firestore 업데이트 → onUserDocumentUpdated CF가 Firebase Auth 비밀번호를 변경합니다.
@@ -563,12 +531,11 @@ class _MemberTabState extends State<MemberTab> {
               child: Semantics(label: '학생 이름 검색 입력란입니다.',
                 child: TextField(
                   controller: _studentSearchCtrl,
-                  onSubmitted: (_) => _resetStudentAndLoad(),
-                  decoration: _searchDeco('이름으로 검색 (Enter)',
+                  decoration: _searchDeco('이름으로 검색',
                       _studentSearchCtrl.text.isNotEmpty
                           ? IconButton(
                               icon: const Icon(Icons.clear_rounded, size: 18),
-                              onPressed: () { _studentSearchCtrl.clear(); _resetStudentAndLoad(); })
+                              onPressed: () => _studentSearchCtrl.clear())
                           : null),
                 ),
               ),
@@ -580,8 +547,9 @@ class _MemberTabState extends State<MemberTab> {
                   value: _studentCourseFilter,
                   onChanged: (val) {
                     if (val == null) return;
-                    setState(() => _studentCourseFilter = val);
-                    _resetStudentAndLoad();
+                    // 강좌 변경: 상태만 업데이트 → _filteredStudents getter가 자동 재계산
+                    // '전체' 선택 시 courseId 조건 없이 전체 학생 표시
+                    setState(() { _studentCourseFilter = val; _studentPage = 1; });
                   },
                 ),
               ),
@@ -595,24 +563,24 @@ class _MemberTabState extends State<MemberTab> {
               boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 10, offset: const Offset(0, 4))],
             ),
             child: Column(children: [
-              _listHeader('학생 목록 (${_students.length}명 표시)'),
+              _listHeader('학생 목록 (${_filteredStudents.length}명)'),
               if (_studentsLoading)
                 const Padding(padding: EdgeInsets.all(32), child: Center(child: CircularProgressIndicator()))
-              else if (_students.isEmpty)
+              else if (_pagedStudents.isEmpty)
                 const Padding(padding: EdgeInsets.all(32),
                     child: Text('해당 조건의 학생이 없습니다.', style: TextStyle(color: Color(0xFF757575))))
               else
-                Column(children: _students.map(_buildStudentTile).toList()),
+                Column(children: _pagedStudents.map(_buildStudentTile).toList()),
             ]),
           ),
           const SizedBox(height: 12),
-          if (!_studentsLoading && (_students.isNotEmpty || _studentPage > 1))
+          if (!_studentsLoading && _filteredStudents.length > _pageSize)
             _buildPagination(
               page: _studentPage,
-              hasPrev: _studentPage > 1,
+              hasPrev: _studentHasPrev,
               hasMore: _studentHasMore,
-              onPrev: _studentPrevPage,
-              onNext: _studentNextPage,
+              onPrev: () => setState(() => _studentPage--),
+              onNext: () => setState(() => _studentPage++),
             ),
         ],
       ),

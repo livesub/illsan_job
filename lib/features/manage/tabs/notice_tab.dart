@@ -15,7 +15,6 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter_quill/flutter_quill.dart'; // 🌟 스마트 에디터용
-import 'package:http/http.dart' as http; // 🌟 푸시 알림 발송 통신용 패키지
 
 import '../../../core/enums/user_role.dart';
 import '../../../core/utils/firestore_keys.dart';
@@ -660,68 +659,48 @@ class _NoticeFormDialogState extends State<_NoticeFormDialog> {
     }
   }
 
-  // 🌟 [핵심 추가] 푸시 알림 발송 로직 (앱에서 직접 FCM 발송)
+  // 공지유형 → FCM topic 매핑 후 fcm_tasks 컬렉션에 write
+  // Cloud Function onFcmTaskCreated 가 Admin SDK로 topic 발송 처리
   Future<void> _sendPushNotification(String noticeTitle) async {
     try {
-      // 1. 선택된 대상(target)에 따라 필터링 쿼리를 만듭니다.
-      Query query = FirebaseFirestore.instance.collection(FsCol.users);
-
+      // 공지유형 → topic 변환 (클라이언트 FCM 직접 호출 불가 → Firestore write 방식)
+      String topic;
       if (_target == FsNotice.targetTeachers) {
-        query = query.where(FsUser.role, isEqualTo: FsUser.roleInstructor);
+        topic = 'role_INSTRUCTOR';
       } else if (_target == FsNotice.targetStudents) {
-        query = query.where(FsUser.role, isEqualTo: FsUser.roleStudent);
+        topic = 'role_STUDENT';
       } else if (_target == FsNotice.targetCourse) {
-        query = query.where(FsUser.courseId, isEqualTo: _selectedCourseId);
-      }
-      // targetAll 이나 targetCourseAll인 경우는 조건에 맞춰 전체를 조회합니다.
-
-      // 2. 쿼리를 실행하여 대상자들의 데이터를 가져옵니다.
-      final snap = await query.get();
-      List<String> tokens = [];
-
-      for (var doc in snap.docs) {
-        final data = doc.data() as Map<String, dynamic>;
-        // ⚠️ 주의: 실제 DB에 저장되는 FCM 토큰 필드명으로 변경해 주세요. (예: fcmToken, fcm_token 등)
-        final token = data['fcmToken'] as String?;
-        if (token != null && token.isNotEmpty) {
-          tokens.add(token);
+        // 특정 강좌 수강생 대상 — courseId 미선택 시 발송 중단
+        if (_selectedCourseId == null || _selectedCourseId!.isEmpty) {
+          debugPrint('[FCM] ❌ targetCourse인데 courseId 없음 → 발송 중단');
+          return;
         }
+        topic = 'course_$_selectedCourseId';
+      } else if (_target == FsNotice.targetCourseAll) {
+        // 담당 반 전체: CF가 authorId로 강좌 목록 조회 후 각 course_* topic 발송
+        topic = 'courseAll';
+      } else {
+        // FsNotice.targetAll (전체)
+        topic = 'all';
       }
 
-      if (tokens.isEmpty) {
-        print('푸시 발송 건너뜀: 알림을 받을 대상자의 토큰이 없습니다.');
-        return; 
-      }
+      debugPrint('[FCM] 발송 요청 시작 → target: $_target | topic: $topic | title: $noticeTitle');
 
-      // 3. 수집된 토큰들로 푸시 알림 발송 (FCM API 호출)
-      // ⚠️ 주의: 실제 발송 시에는 아래 URL과 Bearer 토큰을 개발자님의 서버 환경(또는 서버 키)에 맞게 설정해야 합니다.
-      final url = Uri.parse('https://fcm.googleapis.com/v1/projects/YOUR_PROJECT_ID/messages:send');
-      final headers = {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer 여기에_서버_액세스_토큰_입력',
-      };
+      // Firestore fcm_tasks write → Cloud Function이 Admin SDK로 FCM topic 발송
+      final docRef = await FirebaseFirestore.instance.collection('fcm_tasks').add({
+        'topic':     topic,
+        'title':     '새 공지사항: $noticeTitle',
+        'body':      'Job 알리미에 새로운 공지사항이 등록되었습니다.',
+        'target':    _target,
+        'courseId':  _selectedCourseId,
+        'authorId':  widget.authorUid,
+        'status':    'pending',
+        'createdAt': FieldValue.serverTimestamp(),
+      });
 
-      for (String token in tokens) {
-        final payload = {
-          'message': {
-            'token': token,
-            'notification': {
-              'title': '새 공지사항: $noticeTitle',
-              'body': 'Job 알리미에 새로운 공지사항이 등록되었습니다. 확인해 보세요!',
-            },
-          }
-        };
-
-        // http.post로 구글 FCM 서버에 전송을 요청합니다.
-        await http.post(
-          url,
-          headers: headers,
-          body: jsonEncode(payload),
-        );
-      }
-      print('푸시 알림 발송 완료: 총 ${tokens.length}명에게 발송됨.');
+      debugPrint('[FCM] ✅ fcm_tasks 저장 완료 → docId: ${docRef.id} | topic: $topic');
     } catch (e) {
-      print('푸시 알림 발송 중 에러 발생: $e');
+      debugPrint('[FCM] ❌ 발송 요청 실패: $e');
     }
   }
 
