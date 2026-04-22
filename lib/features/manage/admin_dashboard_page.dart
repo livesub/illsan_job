@@ -19,6 +19,7 @@ import 'tabs/member_tab.dart';
 import 'tabs/course_tab.dart';
 import 'tabs/notice_tab.dart';
 import 'tabs/job_tab.dart';
+import 'tabs/instructor_outing_tab.dart';
 import '../login/login_intro_page.dart';
 
 // 관리자 대시보드 페이지 — 사이드바 + 콘텐츠 영역을 포함합니다.
@@ -112,6 +113,10 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
       // INSTRUCTOR 전용 — 구직 등록
       if (widget.userRole == UserRole.INSTRUCTOR)
         _MenuItem(icon: Icons.work_rounded, label: '구직 등록 관리'),
+
+      // INSTRUCTOR 전용 — 외출 관리
+      if (widget.userRole == UserRole.INSTRUCTOR)
+        _MenuItem(icon: Icons.directions_walk_rounded, label: '외출 관리'),
     ];
   }
 
@@ -125,10 +130,13 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
             NoticeTab(userRole: widget.userRole, userName: widget.userName),
           ]
         : <Widget>[
-            const InstructorHomeTab(),
+            InstructorHomeTab(
+              onNavigateToOuting: () => setState(() => _selectedIndex = 4),
+            ),
             MemberTab(userRole: widget.userRole),
             NoticeTab(userRole: widget.userRole, userName: widget.userName),
             JobTab(userRole: widget.userRole, userName: widget.userName),
+            const InstructorOutingTab(),
           ];
     return IndexedStack(index: _selectedIndex, children: children);
   }

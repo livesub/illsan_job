@@ -31,6 +31,9 @@ class FsCol {
 
   // 구직 공고 댓글/대댓글 컬렉션
   static const String jobComments      = 'job_comments';
+
+  // 외출/조퇴 신청 컬렉션
+  static const String outings          = 'outings';
 }
 
 // ─────────────────────────────────────────────────────────
@@ -71,6 +74,10 @@ class FsUser {
   static const String tempPwAt      = 'temp_pw_at';
   // 가입 경로: 'email' | 'google' | 'kakao' 등 (미설정 시 email로 간주)
   static const String loginType     = 'login_type';
+  // 당월 조퇴/결석 카운트 (매월 1일 자동 리셋 예정)
+  static const String monthlyLateCount    = 'monthly_late_count';
+  static const String monthlyAbsenceCount = 'monthly_absence_count';
+  static const String lastResetDate       = 'last_reset_date';
 
   // ── loginType 값 상수 ────────────────────────────────────
   static const String loginTypeEmail  = 'email';   // 이메일 직접 가입
@@ -332,4 +339,37 @@ class StoragePath {
     final ss = now.second.toString().padLeft(2, '0');  // 초
     return '$yy$mm$dd$hh$ii$ss';
   }
+}
+
+// ─────────────────────────────────────────────────────────
+// outings/{id} 문서 필드 상수
+//
+// 문서 구조:
+//   uid        : String    — 신청 학생 uid
+//   user_name  : String    — 학생 이름 (비정규화)
+//   job_type   : String    — 직종
+//   reason     : String    — 사유
+//   start_time : Timestamp — 외출 시작 일시
+//   end_time   : Timestamp — 외출 종료 일시
+//   contact    : String    — 연락처(휴대폰)
+//   status     : String    — 'pending' | 'approved' | 'rejected'
+//   created_at : Timestamp — 신청 시각 (serverTimestamp)
+// ─────────────────────────────────────────────────────────
+class FsOuting {
+  FsOuting._();
+
+  static const String uid       = 'uid';
+  static const String userName  = 'user_name';
+  static const String courseId  = 'course_id';  // 학생 소속 강좌 ID (비정규화)
+  static const String jobType   = 'job_type';
+  static const String reason    = 'reason';
+  static const String startTime = 'start_time';
+  static const String endTime   = 'end_time';
+  static const String contact   = 'contact';
+  static const String status    = 'status';
+  static const String createdAt = 'created_at';
+
+  static const String statusPending  = 'pending';
+  static const String statusApproved = 'approved';
+  static const String statusRejected = 'rejected';
 }

@@ -6,6 +6,7 @@ import '../../core/utils/firestore_keys.dart';
 import '../manage/tabs/board_tab.dart';
 import '../login/login_intro_page.dart';
 import 'student_home_tab.dart';
+import 'student_outing_tab.dart';
 
 // 학생 전용 대시보드 — BottomNavigationBar 3탭
 // Tab 0: 홈, Tab 1: 내 지원(준비 중), Tab 2: 게시판
@@ -56,6 +57,7 @@ class _StudentDashboardPageState extends State<StudentDashboardPage> {
         onTap: (i) => setState(() => _tabIndex = i),
         selectedItemColor: _blue,
         unselectedItemColor: const Color(0xFF9E9E9E),
+        type: BottomNavigationBarType.fixed,
         items: const [
           BottomNavigationBarItem(
               icon: Icon(Icons.home_rounded), label: '홈'),
@@ -63,6 +65,8 @@ class _StudentDashboardPageState extends State<StudentDashboardPage> {
               icon: Icon(Icons.assignment_rounded), label: '내 지원'),
           BottomNavigationBarItem(
               icon: Icon(Icons.work_rounded), label: '구직공고'),
+          BottomNavigationBarItem(
+              icon: Icon(Icons.directions_walk_rounded), label: '외출 관리'),
         ],
       ),
     );
@@ -78,6 +82,7 @@ class _StudentDashboardPageState extends State<StudentDashboardPage> {
         ),
         const _StudentApplicationsTab(),
         BoardTab(userRole: widget.userRole, userName: widget.userName, showNotices: false),
+        StudentOutingTab(userName: widget.userName),
       ],
     );
   }

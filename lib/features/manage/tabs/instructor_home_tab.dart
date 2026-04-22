@@ -13,7 +13,8 @@ import '../../../core/utils/firestore_keys.dart';
 import '../../../core/utils/firebase_password_service.dart';
 
 class InstructorHomeTab extends StatefulWidget {
-  const InstructorHomeTab({super.key});
+  final VoidCallback? onNavigateToOuting;
+  const InstructorHomeTab({super.key, this.onNavigateToOuting});
 
   @override
   State<InstructorHomeTab> createState() => _InstructorHomeTabState();
@@ -28,6 +29,7 @@ class _InstructorHomeTabState extends State<InstructorHomeTab>
   int _tabIndex = 0;
 
   String _uid = '';
+  Stream<int>? _outingStream;
   List<QueryDocumentSnapshot> _myCourses = [];
   List<QueryDocumentSnapshot> _allCourses = [];
   List<QueryDocumentSnapshot> _pendingStudents = [];
@@ -65,6 +67,19 @@ class _InstructorHomeTabState extends State<InstructorHomeTab>
           .where(FsCourse.status, isEqualTo: FsCourse.statusActive)
           .get();
       _myCourses = myCoursesSnap.docs;
+      final courseIds = _myCourses.map((d) => d.id).take(30).toList();
+      if (courseIds.isNotEmpty) {
+        // 담당 반 외출 pending 건수 실시간 Stream
+        _outingStream = _db
+            .collection(FsCol.outings)
+            .where(FsOuting.courseId, whereIn: courseIds)
+            .snapshots()
+            .map((snap) => snap.docs
+                .where((d) =>
+                    (d.data()[FsOuting.status] as String?) ==
+                    FsOuting.statusPending)
+                .length);
+      }
 
       // 전체 활성 강좌 로드 (승인 팝업 selectbox용)
       final allCoursesSnap = await _db
@@ -153,10 +168,69 @@ class _InstructorHomeTabState extends State<InstructorHomeTab>
                 style: TextStyle(fontSize: 14, color: Color(0xFF757575))),
             const SizedBox(height: 24),
             _buildCoursesSection(),
-            const SizedBox(height: 24),
+            const SizedBox(height: 12),
+            _buildOutingPendingCard(),
+            const SizedBox(height: 12),
             _buildTabSection(),
             const SizedBox(height: 24),
           ],
+        ),
+      ),
+    );
+  }
+
+  // 외출 신청 대기자 카드 (실시간 Stream)
+  Widget _buildOutingPendingCard() {
+    if (_outingStream == null) return const SizedBox.shrink();
+    return Semantics(
+      label: '외출 신청 대기 건 보기',
+      button: true,
+      child: GestureDetector(
+        onTap: widget.onNavigateToOuting,
+        child: StreamBuilder<int>(
+          stream: _outingStream,
+          builder: (_, snap) {
+            final count = snap.data ?? 0;
+            return Container(
+              margin: const EdgeInsets.only(bottom: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: [
+                  BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.06),
+                      blurRadius: 8,
+                      offset: const Offset(0, 3)),
+                ],
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFEF6C00).withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(Icons.directions_walk_rounded,
+                        color: Color(0xFFEF6C00), size: 22),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Text(
+                      '외출 신청 대기자 $count명',
+                      style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF1A1A2E)),
+                    ),
+                  ),
+                  const Icon(Icons.chevron_right_rounded,
+                      color: Color(0xFF9E9E9E), size: 20),
+                ],
+              ),
+            );
+          },
         ),
       ),
     );
