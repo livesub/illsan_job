@@ -57,12 +57,14 @@ android {
         }
     }
 
-    applicationVariants.all {
-        val variant = this
-        variant.outputs.all {
-            val output = this as com.android.build.gradle.internal.api.BaseVariantOutputImpl
-            if (variant.buildType.name == "release") {
-                output.outputFileName = "ilsanjob.apk"
+}
+
+afterEvaluate {
+    tasks.named("packageRelease") {
+        doLast {
+            val outputDir = file("${project.buildDir}/outputs/apk/release")
+            outputDir.listFiles { _, n -> n.endsWith(".apk") }?.forEach { apk ->
+                if (apk.name != "ilsan-job.apk") apk.renameTo(File(apk.parent, "ilsan-job.apk"))
             }
         }
     }
