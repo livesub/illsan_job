@@ -78,6 +78,7 @@ class _BoardTabState extends State<BoardTab> {
     if (_notices.length > 1) _startCarouselTimer();
   }
 
+
   void _startCarouselTimer() {
     _carouselTimer = Timer.periodic(const Duration(seconds: 4), (_) {
       if (!mounted || _notices.isEmpty) return;
