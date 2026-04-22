@@ -12,7 +12,7 @@
 | :--- | :--- | :--- |
 | **Frontend** | **Flutter** | Web & Mobile 응답형 UI, 효율적인 상태 관리 |
 | **Backend** | **Firebase** | Firestore(DB), Auth(인증), Storage(파일 관리) |
-| **Serverless** | **Cloud Functions** | FCM 푸시 알림 트리거 및 자동화 로직 |
+| **Serverless** | **Cloud Functions** | FCM 푸시 알림 트리거 및 자동화 로직**(차후업데이트)** |
 | **Automation** | **Pub/Sub Scheduler** | 매일 자정 종료 강좌 자동 상태 변경 (Cron Job) |
 
 ---
