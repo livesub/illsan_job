@@ -281,7 +281,7 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                 title: const Text('로그아웃', style: TextStyle(color: Colors.white70, fontSize: 14)),
                 onTap: () async {
                   await FirebaseAuth.instance.signOut();
-                  if (!context.mounted) return;
+                  if (!mounted) return;
                   Navigator.of(context).pushAndRemoveUntil(
                     MaterialPageRoute(
                         builder: (_) => const LoginIntroPage()),

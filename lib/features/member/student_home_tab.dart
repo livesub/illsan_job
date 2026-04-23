@@ -44,7 +44,7 @@ class _StudentHomeTabState extends State<StudentHomeTab> {
   int                          _bannerIndex = 0;
 
   // 구직 무한스크롤
-  List<QueryDocumentSnapshot> _jobs       = [];
+  final List<QueryDocumentSnapshot> _jobs       = [];
   DocumentSnapshot?            _lastJobDoc;
   bool _hasMore     = true;
   bool _loadingJobs = false;

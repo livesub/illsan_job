@@ -32,7 +32,7 @@ class _BoardTabState extends State<BoardTab> {
   int _pageIndex = 0;
   Timer? _carouselTimer;
 
-  List<QueryDocumentSnapshot> _jobs = [];
+  final List<QueryDocumentSnapshot> _jobs = [];
   DocumentSnapshot? _lastJobDoc;
   bool _hasMore = true;
   bool _loadingJobs = false;
@@ -71,7 +71,7 @@ class _BoardTabState extends State<BoardTab> {
         .get();
     if (!mounted) return;
     final filtered = snap.docs.where((d) {
-      final data = d.data() as Map<String, dynamic>;
+      final data = d.data();
       return !((data[FsNotice.isDeleted] as bool?) ?? false);
     }).take(5).toList();
     setState(() => _notices = filtered);
@@ -102,7 +102,7 @@ class _BoardTabState extends State<BoardTab> {
       final snap = await query.get();
       if (!mounted) return;
       final newDocs = snap.docs.where((d) {
-        final data = d.data() as Map<String, dynamic>;
+        final data = d.data();
         return !((data[FsJob.isDeleted] as bool?) ?? false);
       }).toList();
       setState(() {
@@ -480,7 +480,7 @@ class _JobDetailPageState extends State<_JobDetailPage> {
         final existStatus = existing.data()?[FsJobApp.status] as String?;
         // 활성 지원이 이미 있으면 무시
         if (existStatus == FsJobApp.statusPending ||
-            existStatus == FsJobApp.statusApproved) return;
+            existStatus == FsJobApp.statusApproved) { return; }
         txn.set(appRef, {
           FsJobApp.jobId:          widget.jobDoc.id,
           FsJobApp.jobTitle:       jobData[FsJob.title],

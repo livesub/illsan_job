@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/firestore_keys.dart';
@@ -114,7 +113,7 @@ class _StudentJobDetailPageState extends State<StudentJobDetailPage> {
             existing.data()?[FsJobApp.status] as String?;
         // 활성 지원이 이미 있으면 무시
         if (existStatus == FsJobApp.statusPending ||
-            existStatus == FsJobApp.statusApproved) return;
+            existStatus == FsJobApp.statusApproved) { return; }
         txn.set(appRef, {
           FsJobApp.jobId:          widget.jobDoc.id,
           FsJobApp.jobTitle:       jobData[FsJob.title]      ?? '',
@@ -422,16 +421,6 @@ class _StudentJobDetailPageState extends State<StudentJobDetailPage> {
     } catch (_) {
       return raw.replaceAll(RegExp(r'<[^>]*>'), '').trim();
     }
-  }
-
-  // 이메일 앞 4자 노출, 나머지 마스킹
-  String _maskEmail(String email) {
-    final parts = email.split('@');
-    if (parts.length != 2) return email;
-    final local   = parts[0];
-    final domain  = parts[1];
-    final visible = local.length >= 4 ? local.substring(0, 4) : local;
-    return '$visible***@$domain';
   }
 
   // 대댓글 존재 여부 — 수정 차단 판단

@@ -106,8 +106,6 @@ class _StudentApplicationsTab extends StatefulWidget {
 }
 
 class _StudentApplicationsTabState extends State<_StudentApplicationsTab> {
-  static const Color _blue = Color(0xFF1565C0);
-
   String get _uid => FirebaseAuth.instance.currentUser?.uid ?? '';
   List<QueryDocumentSnapshot> _apps = [];
   bool _loading = true;

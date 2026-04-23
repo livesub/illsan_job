@@ -197,7 +197,7 @@ class _StudentRegisterPageState extends State<StudentRegisterPage> {
                           Semantics(
                             label: '소속 반 선택 목록입니다. 필수 항목입니다.',
                             child: DropdownButtonFormField<String>(
-                              value: _selectedCourseId,
+                              initialValue: _selectedCourseId,
                               hint: const Text('반을 선택해 주세요.'),
                               decoration: _inputDeco('', Icons.class_outlined),
                               items: _courses.map((c) => DropdownMenuItem(

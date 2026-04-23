@@ -68,7 +68,7 @@ class _MemberTabState extends State<MemberTab> {
       if (!mounted) return;
       setState(() {
         _courses = snap.docs.map((d) {
-          final data = d.data() as Map<String, dynamic>; 
+          final data = d.data();
           return {
             'id': d.id,
             'name': (data[FsCourse.name] ?? '') as String,
@@ -76,9 +76,7 @@ class _MemberTabState extends State<MemberTab> {
           };
         }).toList();
       });
-    } catch (e) {
-      print('강좌 목록을 불러오는 중 에러 발생: $e');
-    }
+    } catch (_) {}
   }
 
 
@@ -96,12 +94,11 @@ class _MemberTabState extends State<MemberTab> {
       if (!mounted) return;
       setState(() {
         _allTeachers = snap.docs.where((d) {
-          return (d.data() as Map<String, dynamic>)[FsUser.isDeleted] != true;
+          return d.data()[FsUser.isDeleted] != true;
         }).toList();
         _teachersLoading = false;
       });
     } catch (e) {
-      print('🚨 교사 목록 불러오기 에러: $e');
       if (mounted) setState(() => _teachersLoading = false);
     }
   }
@@ -122,7 +119,7 @@ class _MemberTabState extends State<MemberTab> {
       final name = ((data[FsUser.name] as String?) ?? '').toLowerCase();
       if (search.isNotEmpty && !name.contains(search)) return false; // 부분 일치
       if (courseTeacherId != null) {
-        if (courseTeacherId!.isEmpty || doc.id != courseTeacherId) return false;
+        if (courseTeacherId.isEmpty || doc.id != courseTeacherId) return false;
       }
       return true;
     }).toList();
@@ -152,7 +149,7 @@ class _MemberTabState extends State<MemberTab> {
       setState(() {
         // isDeleted 제외한 전체 학생 보관 → 필터는 아래 getter에서 처리
         _allStudents = snap.docs
-            .where((d) => (d.data() as Map<String, dynamic>)[FsUser.isDeleted] != true)
+            .where((d) => d.data()[FsUser.isDeleted] != true)
             .toList();
         _studentsLoading = false;
       });
@@ -801,7 +798,6 @@ class _TeacherRegisterDialogState extends State<_TeacherRegisterDialog> {
   final _pwCfmCtrl    = TextEditingController();
   final _bioCtrl      = TextEditingController();
 
-  PlatformFile? _photoFile;
   bool _isLoading    = false;
   bool _obscurePw    = true;
   bool _obscurePwCfm = true;
@@ -811,12 +807,6 @@ class _TeacherRegisterDialogState extends State<_TeacherRegisterDialog> {
     _nameCtrl.dispose(); _phoneCtrl.dispose(); _emailCtrl.dispose();
     _pwCtrl.dispose();   _pwCfmCtrl.dispose(); _bioCtrl.dispose();
     super.dispose();
-  }
-
-  Future<void> _pickPhoto() async {
-    final result = await FilePicker.platform.pickFiles(type: FileType.image, withData: true);
-    if (result == null || result.files.isEmpty) return;
-    setState(() => _photoFile = result.files.first);
   }
 
   Future<void> _submit() async {
@@ -934,20 +924,6 @@ class _TeacherRegisterDialogState extends State<_TeacherRegisterDialog> {
                   IconButton(icon: const Icon(Icons.close_rounded), onPressed: () => Navigator.of(context).pop()),
                 ]),
                 const SizedBox(height: 16),
-                if (false) ...[
-                  Center(child: GestureDetector(
-                    onTap: _pickPhoto,
-                    child: Semantics(label: '프로필 사진 선택 버튼입니다.',
-                      child: CircleAvatar(
-                        radius: 40,
-                        backgroundColor: const Color(0xFFE3F2FD),
-                        backgroundImage: _photoFile?.bytes != null ? MemoryImage(_photoFile!.bytes!) : null,
-                        child: _photoFile == null ? const Icon(Icons.add_a_photo_rounded, color: _blue, size: 28) : null,
-                      ),
-                    ),
-                  )),
-                  const SizedBox(height: 20),
-                ],
                 _field('이메일(ID)', _emailCtrl, keyboardType: TextInputType.emailAddress,
                     validator: (v) {
                       if (v == null || v.trim().isEmpty) return '이메일을 입력해 주세요.';
@@ -1093,12 +1069,6 @@ class _TeacherEditDialogState extends State<_TeacherEditDialog> {
     setState(() { _assignedCourseIds = snap.docs.map((d) => d.id).toList(); });
   }
 
-  Future<void> _pickPhoto() async {
-    final result = await FilePicker.platform.pickFiles(type: FileType.image, withData: true);
-    if (result == null || result.files.isEmpty) return;
-    setState(() => _newPhotoFile = result.files.first);
-  }
-
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _isLoading = true);
@@ -1193,29 +1163,6 @@ class _TeacherEditDialogState extends State<_TeacherEditDialog> {
                   IconButton(icon: const Icon(Icons.close_rounded), onPressed: () => Navigator.of(context).pop()),
                 ]),
                 const SizedBox(height: 16),
-                if (false) Center(child: GestureDetector(
-                  onTap: _pickPhoto,
-                  child: Semantics(label: '프로필 사진 변경 버튼입니다.',
-                    child: Stack(children: [
-                      CircleAvatar(
-                        radius: 40,
-                        backgroundColor: const Color(0xFFE3F2FD),
-                        backgroundImage: _newPhotoFile?.bytes != null
-                            ? MemoryImage(_newPhotoFile!.bytes!) as ImageProvider
-                            : (_existPhotoUrl.isNotEmpty ? NetworkImage(_existPhotoUrl) : null),
-                        child: (_newPhotoFile == null && _existPhotoUrl.isEmpty)
-                            ? const Icon(Icons.person_rounded, color: _blue, size: 36) : null,
-                      ),
-                      Positioned(bottom: 0, right: 0,
-                        child: Container(
-                          width: 24, height: 24,
-                          decoration: const BoxDecoration(color: _blue, shape: BoxShape.circle),
-                          child: const Icon(Icons.edit_rounded, color: Colors.white, size: 14),
-                        ),
-                      ),
-                    ]),
-                  ),
-                )),
                 _field('이름', _nameCtrl,
                     validator: (v) => (v == null || v.trim().isEmpty) ? '이름을 입력해 주세요.' : null),
                 const SizedBox(height: 14),

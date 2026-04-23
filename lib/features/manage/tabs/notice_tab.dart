@@ -12,8 +12,6 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
-import 'package:image_picker/image_picker.dart';
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter_quill/flutter_quill.dart'; // 🌟 스마트 에디터용
 
 import '../../../core/enums/user_role.dart';
@@ -553,7 +551,6 @@ class _NoticeFormDialogState extends State<_NoticeFormDialog> {
 
   // 반별 공지 선택 강좌
   String? _selectedCourseId;
-  String? _selectedCourseName;
 
   List<Map<String, String>> _activeCourses = [];
   bool _loadingCourses = true;
@@ -648,10 +645,6 @@ class _NoticeFormDialogState extends State<_NoticeFormDialog> {
       setState(() {
         _activeCourses = courses;
         _loadingCourses = false;
-        if (_selectedCourseId != null) {
-          final match = courses.where((c) => c['id'] == _selectedCourseId);
-          _selectedCourseName = match.isNotEmpty ? match.first['name'] : null;
-        }
       });
     } catch (_) {
       if (!mounted) return;
@@ -795,8 +788,10 @@ class _NoticeFormDialogState extends State<_NoticeFormDialog> {
                 onPressed: () {
                   // 닫기 버튼 누를 때도 포커스 해제
                   FocusManager.instance.primaryFocus?.unfocus();
+                  final nav = Navigator.of(context);
                   Future.delayed(const Duration(milliseconds: 50), () {
-                    if (mounted) Navigator.pop(context);
+                    if (!mounted) return;
+                    nav.pop();
                   });
                 },
                 padding: EdgeInsets.zero,
@@ -1026,7 +1021,7 @@ class _NoticeFormDialogState extends State<_NoticeFormDialog> {
       );
     }
     return DropdownButtonFormField<String>(
-      value: _selectedCourseId,
+      initialValue: _selectedCourseId,
       isExpanded: true,
       decoration: _inputDeco('강좌를 선택해 주세요.'),
       items: _activeCourses
@@ -1036,8 +1031,7 @@ class _NoticeFormDialogState extends State<_NoticeFormDialog> {
               ))
           .toList(),
       onChanged: (id) => setState(() {
-        _selectedCourseId   = id;
-        _selectedCourseName = _activeCourses.firstWhere((c) => c['id'] == id)['name'];
+        _selectedCourseId = id;
       }),
       validator: (v) => v == null ? '강좌를 선택해 주세요.' : null,
     );

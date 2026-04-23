@@ -13,8 +13,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter_quill/flutter_quill.dart';
-import 'package:image_picker/image_picker.dart';
-import 'package:file_picker/file_picker.dart';
 import 'package:cross_file/cross_file.dart';
 import '../../../core/enums/user_role.dart';
 import '../../../core/utils/firestore_keys.dart';
@@ -240,7 +238,7 @@ class _JobTabState extends State<JobTab> {
         .where(FsJobComment.jobId, isEqualTo: jobId)
         .get();
     return snap.docs.where((d) {
-      final data = d.data() as Map<String, dynamic>;
+      final data = d.data();
       return data[FsJobComment.isDeleted] != true;
     }).length;
   }
@@ -564,7 +562,6 @@ class _JobFormDialogState extends State<_JobFormDialog> {
   // 인라인 이미지
   final List<String> _imgPaths = [];
   final List<String> _imgUrls  = [];
-  bool _uploadingImg = false;
 
   // 담당 반 목록 및 노출 대상 선택
   List<QueryDocumentSnapshot> _courses = [];
@@ -579,8 +576,6 @@ class _JobFormDialogState extends State<_JobFormDialog> {
   // 수정 시 삭제된 기존 파일 경로 (저장 시 Hard Delete)
   final List<String>  _removedAttachPaths = [];
 
-  static const int    _maxAttach    = 3;
-  static const int    _maxBytes     = 3 * 1024 * 1024; // 3MB
   static const Color  _blue         = Color(0xFF1565C0);
 
   @override
@@ -684,95 +679,6 @@ class _JobFormDialogState extends State<_JobFormDialog> {
       _existAttachPaths.add(p);
       _existAttachNames.add(p.split('/').last);
     }
-  }
-
-  // 인라인 이미지 업로드
-  Future<void> _pickAndUploadImage() async {
-    final picker = ImagePicker();
-    final picked = await picker.pickImage(
-      source: ImageSource.gallery,
-      maxWidth: 1024,
-      maxHeight: 1024,
-      imageQuality: 80,
-    );
-    if (picked == null || !mounted) return;
-    setState(() => _uploadingImg = true);
-    try {
-      final bytes = await picked.readAsBytes();
-      final now   = DateTime.now();
-      final path  =
-          '${StoragePath.inlinePath(StoragePath.boardJob, now.year, now.month)}'
-          '${now.millisecondsSinceEpoch}_${picked.name}';
-      final ref = FirebaseStorage.instance.ref(path);
-      await ref.putData(bytes, SettableMetadata(contentType: 'image/jpeg'));
-      final url = await ref.getDownloadURL();
-      if (!mounted) return;
-      setState(() {
-        _imgPaths.add(path);
-        _imgUrls.add(url);
-      });
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('이미지 업로드 실패: $e'), backgroundColor: Colors.red),
-      );
-    } finally {
-      if (mounted) setState(() => _uploadingImg = false);
-    }
-  }
-
-  Future<void> _removeImage(int index) async {
-    final path = _imgPaths[index];
-    try {
-      await FirebaseStorage.instance.ref(path).delete();
-    } catch (_) {}
-    if (!mounted) return;
-    setState(() {
-      _imgPaths.removeAt(index);
-      _imgUrls.removeAt(index);
-    });
-  }
-
-  // 첨부파일 선택 — XFile.length()로 3MB 체크 (웹/모바일 공통)
-  Future<void> _pickAttachment() async {
-    final total = _existAttachPaths.length + _newAttachFiles.length;
-    if (total >= _maxAttach) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('첨부파일은 최대 3개까지 가능합니다.'), backgroundColor: Colors.orange),
-      );
-      return;
-    }
-    final result = await FilePicker.platform.pickFiles(
-      allowMultiple: false,
-      withData: false,
-    );
-    if (result == null || result.files.isEmpty || !mounted) return;
-
-    final pf   = result.files.first;
-    final xf   = XFile(pf.path ?? '', name: pf.name);
-    final size = pf.size; // file_picker가 제공하는 size (웹/모바일 공통)
-
-    if (size > _maxBytes) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('파일 크기는 3MB 이하만 첨부할 수 있습니다.'), backgroundColor: Colors.orange),
-      );
-      return;
-    }
-    setState(() => _newAttachFiles.add(xf));
-  }
-
-  // 기존 첨부파일 제거 (수정 시 — 저장 시 Hard Delete 예약)
-  void _removeExistAttach(int index) {
-    setState(() {
-      _removedAttachPaths.add(_existAttachPaths[index]);
-      _existAttachPaths.removeAt(index);
-      _existAttachNames.removeAt(index);
-    });
-  }
-
-  // 신규 첨부파일 제거 (아직 업로드 안 됨)
-  void _removeNewAttach(int index) {
-    setState(() => _newAttachFiles.removeAt(index));
   }
 
   Future<void> _save() async {
@@ -1008,32 +914,36 @@ class _JobFormDialogState extends State<_JobFormDialog> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 전체 반 라디오
-          Semantics(
-            label: '내가 담당한 전체 반에 노출 선택입니다.',
-            child: RadioListTile<bool>(
-              value: true,
-              groupValue: _targetAll,
-              onChanged: (v) => setState(() => _targetAll = true),
-              title: const Text('내가 담당한 전체 반',
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-              dense: true,
-              contentPadding: EdgeInsets.zero,
-              activeColor: _blue,
-            ),
-          ),
-          // 특정 반 라디오
-          Semantics(
-            label: '특정 반만 선택하여 노출 선택입니다.',
-            child: RadioListTile<bool>(
-              value: false,
-              groupValue: _targetAll,
-              onChanged: (v) => setState(() => _targetAll = false),
-              title: const Text('특정 반만 선택',
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-              dense: true,
-              contentPadding: EdgeInsets.zero,
-              activeColor: _blue,
+          RadioGroup<bool>(
+            groupValue: _targetAll,
+            onChanged: (v) { if (v != null) setState(() => _targetAll = v); },
+            child: Column(
+              children: [
+                // 전체 반 라디오
+                Semantics(
+                  label: '내가 담당한 전체 반에 노출 선택입니다.',
+                  child: RadioListTile<bool>(
+                    value: true,
+                    title: const Text('내가 담당한 전체 반',
+                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    activeColor: _blue,
+                  ),
+                ),
+                // 특정 반 라디오
+                Semantics(
+                  label: '특정 반만 선택하여 노출 선택입니다.',
+                  child: RadioListTile<bool>(
+                    value: false,
+                    title: const Text('특정 반만 선택',
+                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    activeColor: _blue,
+                  ),
+                ),
+              ],
             ),
           ),
           // 특정 반 체크박스 목록
@@ -1186,73 +1096,7 @@ class _JobFormDialogState extends State<_JobFormDialog> {
     );
   }
 
-  // 첨부파일 섹션
-  Widget _buildAttachSection() {
-    final totalCount = _existAttachPaths.length + _newAttachFiles.length;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // 기존 첨부파일 (수정 시)
-        ..._existAttachPaths.asMap().entries.map((e) {
-          return _buildAttachTile(
-            name: _existAttachNames[e.key],
-            onRemove: () => _removeExistAttach(e.key),
-            isNew: false,
-          );
-        }),
-        // 신규 선택 파일
-        ..._newAttachFiles.asMap().entries.map((e) {
-          return _buildAttachTile(
-            name: e.value.name,
-            onRemove: () => _removeNewAttach(e.key),
-            isNew: true,
-          );
-        }),
-        if (totalCount < _maxAttach)
-          Semantics(
-            label: '첨부파일 추가 버튼입니다.',
-            child: OutlinedButton.icon(
-              style: OutlinedButton.styleFrom(
-                foregroundColor: _blue,
-                side: const BorderSide(color: _blue),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                minimumSize: Size.zero,
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              ),
-              onPressed: _pickAttachment,
-              icon: const Icon(Icons.attach_file_rounded, size: 16),
-              label: Text('파일 추가 ($totalCount/$_maxAttach)',
-                  style: const TextStyle(fontSize: 13)),
-            ),
-          ),
-      ],
-    );
-  }
 
-  Widget _buildAttachTile({required String name, required VoidCallback onRemove, required bool isNew}) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
-      child: Row(children: [
-        const Icon(Icons.insert_drive_file_rounded, size: 16, color: Color(0xFF757575)),
-        const SizedBox(width: 6),
-        Expanded(
-          child: Text(name,
-              style: const TextStyle(fontSize: 12),
-              overflow: TextOverflow.ellipsis),
-        ),
-        if (isNew)
-          const Text('신규', style: TextStyle(fontSize: 10, color: Color(0xFF00897B))),
-        const SizedBox(width: 4),
-        Semantics(
-          label: '$name 첨부파일 삭제 버튼입니다.',
-          child: GestureDetector(
-            onTap: onRemove,
-            child: const Icon(Icons.close_rounded, size: 16, color: Color(0xFFD32F2F)),
-          ),
-        ),
-      ]),
-    );
-  }
 
   Widget _buildLabel(String text, {bool required = false}) {
     return RichText(

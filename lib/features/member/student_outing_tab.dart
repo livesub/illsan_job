@@ -120,7 +120,7 @@ class _StudentOutingTabState extends State<StudentOutingTab> {
     DateTime? startTime;
     DateTime? endTime;
 
-    String _fmtDt(DateTime? dt) => dt == null
+    String fmtDt(DateTime? dt) => dt == null
         ? '날짜/시간 선택'
         : '${dt.month}/${dt.day} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
 
@@ -138,6 +138,7 @@ class _StudentOutingTabState extends State<StudentOutingTab> {
               lastDate: now.add(const Duration(days: 30)),
             );
             if (date == null) return;
+            if (!ctx.mounted) return;
             final time = await showTimePicker(
               context: ctx,
               initialTime: TimeOfDay.fromDateTime(now),
@@ -189,7 +190,7 @@ class _StudentOutingTabState extends State<StudentOutingTab> {
                           child: InputDecorator(
                             decoration: const InputDecoration(labelText: '시작 일시'),
                             child: Text(
-                              _fmtDt(startTime),
+                              fmtDt(startTime),
                               style: TextStyle(
                                   color: startTime == null
                                       ? Colors.grey
@@ -208,7 +209,7 @@ class _StudentOutingTabState extends State<StudentOutingTab> {
                           child: InputDecorator(
                             decoration: const InputDecoration(labelText: '종료 일시'),
                             child: Text(
-                              _fmtDt(endTime),
+                              fmtDt(endTime),
                               style: TextStyle(
                                   color: endTime == null
                                       ? Colors.grey
@@ -244,7 +245,7 @@ class _StudentOutingTabState extends State<StudentOutingTab> {
                     return;
                   }
                   final hasOverlap = await _hasTimeOverlap(startTime!, endTime!);
-                  if (!mounted) return;
+                  if (!ctx.mounted) return;
                   if (hasOverlap) {
                     ScaffoldMessenger.of(ctx).showSnackBar(
                       const SnackBar(
@@ -279,7 +280,7 @@ class _StudentOutingTabState extends State<StudentOutingTab> {
         .where(FsOuting.uid, isEqualTo: _uid)
         .get();
     for (final doc in snap.docs) {
-      final data = doc.data() as Map<String, dynamic>;
+      final data = doc.data();
       final status = (data[FsOuting.status] as String?) ?? '';
       if (status == FsOuting.statusRejected) continue;
       final existStart = (data[FsOuting.startTime] as Timestamp?)?.toDate();
