@@ -3,12 +3,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:file_picker/file_picker.dart';
 import '../../../core/enums/user_role.dart';
 import '../../../core/utils/firestore_keys.dart';
 import 'member_detail_readonly_view.dart';
-import 'package:firebase_core/firebase_core.dart';
 
 class MemberTab extends StatefulWidget {
   final UserRole userRole;
@@ -187,18 +187,26 @@ class _MemberTabState extends State<MemberTab> {
   bool get _studentHasPrev => _studentPage > 1;
   bool get _studentHasMore => _studentPage * _pageSize < _filteredStudents.length;
 
-  // settings/admin_config.temp_password를 읽어 학생 비밀번호 초기화합니다.
-  // Firestore 업데이트 → onUserDocumentUpdated CF가 Firebase Auth 비밀번호를 변경합니다.
   Future<void> _resetStudentPassword(QueryDocumentSnapshot doc) async {
-    final data = doc.data() as Map<String, dynamic>;
-    final name = (data[FsUser.name] as String?) ?? '학생';
+    final data  = doc.data() as Map<String, dynamic>;
+    final name  = (data[FsUser.name]  as String?) ?? '학생';
+    final email = (data[FsUser.email] as String?) ?? '';
 
+    // admin_config에서 임시 비밀번호 선조회
+    String tempPw = '';
+    try {
+      final cfgSnap = await FirebaseFirestore.instance
+          .collection('settings').doc('admin_config').get();
+      tempPw = (cfgSnap.data()?['temp_password'] as String?) ?? '';
+    } catch (_) {}
+
+    if (!mounted) return;
     final confirm = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         title: const Text('비밀번호 초기화'),
-        content: Text('$name 학생의 비밀번호를 초기화하시겠습니까?'),
+        content: Text('$name 학생의 비밀번호를 초기화하시겠습니까?\n초기화 후 학생에게 임시 비밀번호를 구두로 안내해 주세요.'),
         actions: [
           TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('취소')),
           TextButton(
@@ -211,7 +219,6 @@ class _MemberTabState extends State<MemberTab> {
     );
     if (confirm != true || !mounted) return;
 
-    // 로딩 다이얼로그 표시
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -224,42 +231,42 @@ class _MemberTabState extends State<MemberTab> {
       ),
     );
 
+    // password_resets 문서 생성 → Cloud Function 트리거
+    final reqRef = FirebaseFirestore.instance
+        .collection(FsCol.passwordResets).doc();
+
     try {
-      // 1. settings/admin_config 에서 공용 임시 비밀번호 비동기 읽기
-      final configDoc = await FirebaseFirestore.instance
-          .collection('settings')
-          .doc('admin_config')
-          .get();
-      final tempPw = (configDoc.data()?['temp_password'] as String?) ?? '';
-
-      if (tempPw.isEmpty) {
-        if (!mounted) return;
-        Navigator.of(context).pop();
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('임시 비밀번호가 설정되지 않았습니다. 관리자 설정을 확인해 주세요.'),
-            backgroundColor: Colors.red,
-          ),
-        );
-        return;
-      }
-
-      // 2. 학생 Firestore 문서 업데이트 → onUserDocumentUpdated CF가 Auth 비밀번호 변경
-      await FirebaseFirestore.instance.collection(FsCol.users).doc(doc.id).update({
-        FsUser.isTempPw:    true,
-        FsUser.tempPwPlain: tempPw,
-        FsUser.tempPwAt:    FieldValue.serverTimestamp(),
+      await reqRef.set({
+        'student_uid':   doc.id,
+        'email':         email,
+        'temp_password': tempPw,
+        'status':        'pending',
       });
 
+      // Cloud Function 완료 대기 (최대 30초)
+      final snap = await reqRef.snapshots()
+          .timeout(const Duration(seconds: 30))
+          .firstWhere((s) {
+            final st = (s.data()?['status'] as String?) ?? '';
+            return st == 'done' || st == 'error';
+          });
+
+      await reqRef.delete().catchError((_) {});
       if (!mounted) return;
-      Navigator.of(context).pop(); // 로딩 닫기
+      Navigator.of(context).pop();
 
-      // pop 완료 후 다음 프레임에 결과 팝업 표시 (mouse_tracker 재진입 방지)
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
+      final st = (snap.data()?['status'] as String?) ?? '';
+      if (st == 'done') {
         _showResetResultDialog(tempPw);
-      });
+        _loadStudents(); // UID 변경으로 목록 갱신 필요
+      } else {
+        final err = (snap.data()?['error'] as String?) ?? '알 수 없는 오류';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('초기화 실패: $err'), backgroundColor: Colors.red),
+        );
+      }
     } catch (e) {
+      await reqRef.delete().catchError((_) {});
       if (!mounted) return;
       Navigator.of(context).pop();
       ScaffoldMessenger.of(context).showSnackBar(
@@ -276,7 +283,7 @@ class _MemberTabState extends State<MemberTab> {
           title: const Text('비밀번호 초기화 완료'),
           content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
             const Text(
-              '비밀번호가 초기화되었습니다.\n[복사하기] 버튼을 눌러 학생에게 전달하세요.',
+              '비밀번호가 초기화되었습니다.\n아래 임시 비밀번호를 학생에게 전달하고 로그인하도록 안내해 주세요.',
               style: TextStyle(fontSize: 14),
             ),
             const SizedBox(height: 16),
@@ -636,7 +643,7 @@ class _MemberTabState extends State<MemberTab> {
                 style: TextStyle(color: statusColor, fontSize: 12, fontWeight: FontWeight.w700)),
           ),
           // 비밀번호 초기화 버튼 (SUPER_ADMIN 전용)
-          if (widget.userRole == UserRole.SUPER_ADMIN) ...[
+          if (widget.userRole == UserRole.SUPER_ADMIN || widget.userRole == UserRole.INSTRUCTOR) ...[
             const SizedBox(width: 4),
             Semantics(
               label: '$name 비밀번호 초기화 버튼입니다.',

@@ -86,7 +86,6 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
       context,
       MaterialPageRoute(builder: (_) => const InstructorProfilePage()),
     ).then((_) {
-      // 마이페이지에서 사진 변경 후 돌아오면 갱신
       if (widget.userRole == UserRole.INSTRUCTOR) _loadInstructorPhoto();
     });
   }
