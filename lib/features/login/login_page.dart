@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import '../../core/enums/user_role.dart';
 import '../../core/utils/firestore_keys.dart';
 import '../manage/admin_dashboard_page.dart';
@@ -41,7 +42,7 @@ class _LoginPageState extends State<LoginPage> {
       // Firebase Auth 인증
       final cred = await FirebaseAuth.instance.signInWithEmailAndPassword(
         email: _emailCtrl.text.trim(),
-        password: _pwCtrl.text,
+        password: _pwCtrl.text.trim(),
       );
 
       // Firestore users 문서 조회
@@ -60,12 +61,13 @@ class _LoginPageState extends State<LoginPage> {
       }
 
       final data      = doc.data()!;
-      final roleStr   = data[FsUser.role]      as String? ?? FsUser.roleStudent;
-      final userName  = data[FsUser.name]      as String? ?? '';
-      final status    = data[FsUser.status]    as String? ?? FsUser.statusPending;
-      final isDeleted = data[FsUser.isDeleted] as bool?   ?? false;
-      final isTempPw  = data[FsUser.isTempPw]  as bool?   ?? false;
-      final role      = roleStr.toUserRole();
+      final roleStr      = data[FsUser.role]               as String? ?? FsUser.roleStudent;
+      final userName     = data[FsUser.name]               as String? ?? '';
+      final status       = data[FsUser.status]             as String? ?? FsUser.statusPending;
+      final isDeleted    = data[FsUser.isDeleted]          as bool?   ?? false;
+      final isTempPw     = data[FsUser.isTempPw]           as bool?   ?? false;
+      final needPwChange = data[FsUser.needPasswordChange] as bool?   ?? false;
+      final role         = roleStr.toUserRole();
 
       // 삭제 계정 차단
       if (isDeleted) {
@@ -75,6 +77,10 @@ class _LoginPageState extends State<LoginPage> {
         return;
       }
 
+      // FCM 토큰 저장 (알림 수신용)
+      await _saveFcmToken(uid);
+      if (!mounted) return;
+
       // 승인 대기 → 전용 대기 화면
       if (status == FsUser.statusPending) {
         if (!mounted) return;
@@ -82,9 +88,15 @@ class _LoginPageState extends State<LoginPage> {
         return;
       }
 
-      // 임시 비밀번호 → 비밀번호 변경 강제
+      // is_temp_password → 강제 변경
       if (isTempPw) {
         if (!mounted) return;
+        _go(ChangePasswordPage(userRole: role, userName: userName));
+        return;
+      }
+
+      // needPasswordChange: true → Auth 검증 완료이므로 즉시 강제 변경
+      if (needPwChange) {
         _go(ChangePasswordPage(userRole: role, userName: userName));
         return;
       }
@@ -113,13 +125,27 @@ class _LoginPageState extends State<LoginPage> {
           : AdminDashboardPage(userRole: role, userName: userName));
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
+      debugPrint('[Auth] code=${e.code} msg=${e.message}');
       _showError(_authError(e.code));
     } catch (e) {
       if (!mounted) return;
+      debugPrint('[Auth] unexpected=$e');
       _showError('로그인 실패: $e');
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  Future<void> _saveFcmToken(String uid) async {
+    try {
+      await FirebaseMessaging.instance.requestPermission();
+      final token = await FirebaseMessaging.instance.getToken();
+      if (token == null) return;
+      await FirebaseFirestore.instance
+          .collection(FsCol.users)
+          .doc(uid)
+          .update({FsUser.fcmToken: token});
+    } catch (_) {}
   }
 
   void _go(Widget page) {
@@ -138,9 +164,10 @@ class _LoginPageState extends State<LoginPage> {
   String _authError(String code) {
     switch (code) {
       case 'user-not-found':
+        return '이메일 또는 비밀번호가 올바르지 않습니다.';
       case 'wrong-password':
       case 'invalid-credential':
-        return '이메일 또는 비밀번호가 올바르지 않습니다.';
+        return '비밀번호가 올바르지 않습니다. 임시 비밀번호라면 Firebase Console에 설정된 값과 일치하는지 확인하세요.';
       case 'user-disabled':
         return '비활성화된 계정입니다. 관리자에게 문의하세요.';
       case 'too-many-requests':
@@ -252,12 +279,6 @@ class _LoginPageState extends State<LoginPage> {
                         ),
                         validator: (v) {
                           if (v == null || v.isEmpty) return '비밀번호를 입력해 주세요.';
-                          if (v.length < 8) return '8자 이상 입력해 주세요.';
-                          if (RegExp(r'[가-힣ㄱ-ㅎㅏ-ㅣ]').hasMatch(v)) return '한글은 사용할 수 없습니다.';
-                          if (!RegExp(r'[A-Z]').hasMatch(v)) return '대문자를 1자 이상 포함해야 합니다.';
-                          if (!RegExp(r'''[!@#\$%^&*()\-_=+\[\]{};:\'",.<>?/\\|`~]''').hasMatch(v)) {
-                            return '특수문자를 1자 이상 포함해야 합니다.';
-                          }
                           return null;
                         },
                       ),

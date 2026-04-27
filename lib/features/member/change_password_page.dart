@@ -5,7 +5,7 @@ import '../../core/enums/user_role.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/firestore_keys.dart';
 import '../manage/admin_dashboard_page.dart';
-import 'student_dashboard_page.dart';
+import '../member/student_dashboard_page.dart';
 
 // 임시 비밀번호 로그인 후 강제 비밀번호 변경 화면
 class ChangePasswordPage extends StatefulWidget {
@@ -41,32 +41,51 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
     setState(() => _isLoading = true);
     try {
       final user = FirebaseAuth.instance.currentUser!;
-      // Firebase Auth 비밀번호 변경
+
       await user.updatePassword(_newPwCtrl.text);
-      // Firestore is_temp_password = false
       await FirebaseFirestore.instance
           .collection(FsCol.users)
           .doc(user.uid)
-          .update({FsUser.isTempPw: false});
+          .update({
+        FsUser.isTempPw: false,
+        FsUser.needPasswordChange: false,
+        FsUser.tempPwPlain: FieldValue.delete(), // 임시PW 보안 삭제
+      });
 
       if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('비밀번호가 변경되었습니다.'),
+          backgroundColor: Colors.green,
+          duration: Duration(seconds: 2),
+        ),
+      );
+      // 변경 성공 → 역할별 메인 화면 직행 (뒤로 가기 스택 초기화)
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(
           builder: (_) => widget.userRole == UserRole.STUDENT
-              ? StudentDashboardPage(
-                  userRole: widget.userRole, userName: widget.userName)
-              : AdminDashboardPage(
-                  userRole: widget.userRole, userName: widget.userName),
+              ? StudentDashboardPage(userRole: widget.userRole, userName: widget.userName)
+              : AdminDashboardPage(userRole: widget.userRole, userName: widget.userName),
         ),
         (_) => false,
       );
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
+      // requires-recent-login: 세션 만료 → 재로그인 안내
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(e.code == 'requires-recent-login'
               ? '보안을 위해 다시 로그인해 주세요.'
               : '비밀번호 변경에 실패했습니다.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } catch (e) {
+      // 예상치 못한 오류 처리
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('오류가 발생했습니다: $e'),
           backgroundColor: Colors.red,
         ),
       );
@@ -89,147 +108,150 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      children: [
-        Scaffold(
-          backgroundColor: Colors.white,
-          appBar: AppBar(
+    return PopScope(
+      canPop: false,
+      child: Stack(
+        children: [
+          Scaffold(
             backgroundColor: Colors.white,
-            elevation: 0,
-            automaticallyImplyLeading: false,
-            title: const Text(
-              '비밀번호 변경',
-              style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.textPrimary),
+            appBar: AppBar(
+              backgroundColor: Colors.white,
+              elevation: 0,
+              automaticallyImplyLeading: false,
+              title: const Text(
+                '비밀번호 변경',
+                style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.textPrimary),
+              ),
+              centerTitle: true,
             ),
-            centerTitle: true,
-          ),
-          body: SafeArea(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 32),
-              child: Form(
-                key: _formKey,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const SizedBox(height: 40),
-                    Semantics(
-                      label: '임시 비밀번호 사용 안내입니다.',
-                      child: Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFFFF3E0),
-                          borderRadius: BorderRadius.circular(12),
+            body: SafeArea(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(horizontal: 32),
+                child: Form(
+                  key: _formKey,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const SizedBox(height: 40),
+                      Semantics(
+                        label: '임시 비밀번호 사용 안내입니다.',
+                        child: Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFFF3E0),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Text(
+                            '임시 비밀번호로 로그인하셨습니다.\n보안을 위해 새 비밀번호를 설정해 주세요.',
+                            style: TextStyle(
+                                fontSize: 14,
+                                color: Color(0xFFE65100),
+                                height: 1.5),
+                          ),
                         ),
-                        child: const Text(
-                          '임시 비밀번호로 로그인하셨습니다.\n보안을 위해 새 비밀번호를 설정해 주세요.',
+                      ),
+                      const SizedBox(height: 32),
+                      const Text('새 비밀번호',
                           style: TextStyle(
-                              fontSize: 14,
-                              color: Color(0xFFE65100),
-                              height: 1.5),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 32),
-                    const Text('새 비밀번호',
-                        style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            color: AppColors.textPrimary)),
-                    const SizedBox(height: 8),
-                    Semantics(
-                      label: '새 비밀번호 입력란. 8자 이상, 대문자·특수문자 포함 필수.',
-                      child: TextFormField(
-                        controller: _newPwCtrl,
-                        obscureText: _obscureNew,
-                        textInputAction: TextInputAction.next,
-                        enabled: !_isLoading,
-                        decoration: _inputDeco('새 비밀번호').copyWith(
-                          suffixIcon: Semantics(
-                            label: _obscureNew ? '비밀번호 표시' : '비밀번호 숨기기',
-                            child: IconButton(
-                              icon: Icon(
-                                _obscureNew
-                                    ? Icons.visibility_outlined
-                                    : Icons.visibility_off_outlined,
-                                color: AppColors.textSecondary,
-                                size: 20,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.textPrimary)),
+                      const SizedBox(height: 8),
+                      Semantics(
+                        label: '새 비밀번호 입력란. 8자 이상, 대문자·특수문자 포함 필수.',
+                        child: TextFormField(
+                          controller: _newPwCtrl,
+                          obscureText: _obscureNew,
+                          textInputAction: TextInputAction.next,
+                          enabled: !_isLoading,
+                          decoration: _inputDeco('새 비밀번호').copyWith(
+                            suffixIcon: Semantics(
+                              label: _obscureNew ? '비밀번호 표시' : '비밀번호 숨기기',
+                              child: IconButton(
+                                icon: Icon(
+                                  _obscureNew
+                                      ? Icons.visibility_outlined
+                                      : Icons.visibility_off_outlined,
+                                  color: AppColors.textSecondary,
+                                  size: 20,
+                                ),
+                                onPressed: () =>
+                                    setState(() => _obscureNew = !_obscureNew),
                               ),
-                              onPressed: () =>
-                                  setState(() => _obscureNew = !_obscureNew),
                             ),
                           ),
+                          validator: _validatePw,
                         ),
-                        validator: _validatePw,
                       ),
-                    ),
-                    const SizedBox(height: 20),
-                    const Text('비밀번호 확인',
-                        style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            color: AppColors.textPrimary)),
-                    const SizedBox(height: 8),
-                    Semantics(
-                      label: '비밀번호 확인 입력란.',
-                      child: TextFormField(
-                        controller: _confirmCtrl,
-                        obscureText: _obscureConfirm,
-                        textInputAction: TextInputAction.done,
-                        enabled: !_isLoading,
-                        onFieldSubmitted: (_) => _submit(),
-                        decoration: _inputDeco('새 비밀번호를 다시 입력해 주세요.').copyWith(
-                          suffixIcon: Semantics(
-                            label: _obscureConfirm ? '비밀번호 표시' : '비밀번호 숨기기',
-                            child: IconButton(
-                              icon: Icon(
-                                _obscureConfirm
-                                    ? Icons.visibility_outlined
-                                    : Icons.visibility_off_outlined,
-                                color: AppColors.textSecondary,
-                                size: 20,
+                      const SizedBox(height: 20),
+                      const Text('비밀번호 확인',
+                          style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.textPrimary)),
+                      const SizedBox(height: 8),
+                      Semantics(
+                        label: '비밀번호 확인 입력란.',
+                        child: TextFormField(
+                          controller: _confirmCtrl,
+                          obscureText: _obscureConfirm,
+                          textInputAction: TextInputAction.done,
+                          enabled: !_isLoading,
+                          onFieldSubmitted: (_) => _submit(),
+                          decoration: _inputDeco('새 비밀번호를 다시 입력해 주세요.').copyWith(
+                            suffixIcon: Semantics(
+                              label: _obscureConfirm ? '비밀번호 표시' : '비밀번호 숨기기',
+                              child: IconButton(
+                                icon: Icon(
+                                  _obscureConfirm
+                                      ? Icons.visibility_outlined
+                                      : Icons.visibility_off_outlined,
+                                  color: AppColors.textSecondary,
+                                  size: 20,
+                                ),
+                                onPressed: () =>
+                                    setState(() => _obscureConfirm = !_obscureConfirm),
                               ),
-                              onPressed: () =>
-                                  setState(() => _obscureConfirm = !_obscureConfirm),
                             ),
                           ),
-                        ),
-                        validator: (v) {
-                          if (v == null || v.isEmpty) return '비밀번호를 다시 입력해 주세요.';
-                          if (v != _newPwCtrl.text) return '비밀번호가 일치하지 않습니다.';
-                          return null;
-                        },
-                      ),
-                    ),
-                    const SizedBox(height: 40),
-                    Semantics(
-                      label: '비밀번호 변경 버튼',
-                      child: SizedBox(
-                        width: double.infinity,
-                        height: 56,
-                        child: ElevatedButton(
-                          onPressed: _isLoading ? null : _submit,
-                          child: const Text('비밀번호 변경'),
+                          validator: (v) {
+                            if (v == null || v.isEmpty) return '비밀번호를 다시 입력해 주세요.';
+                            if (v != _newPwCtrl.text) return '비밀번호가 일치하지 않습니다.';
+                            return null;
+                          },
                         ),
                       ),
-                    ),
-                    const SizedBox(height: 40),
-                  ],
+                      const SizedBox(height: 40),
+                      Semantics(
+                        label: '비밀번호 변경 버튼',
+                        child: SizedBox(
+                          width: double.infinity,
+                          height: 56,
+                          child: ElevatedButton(
+                            onPressed: _isLoading ? null : _submit,
+                            child: const Text('비밀번호 변경'),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 40),
+                    ],
+                  ),
                 ),
               ),
             ),
           ),
-        ),
-        if (_isLoading) ...[
-          const ModalBarrier(dismissible: false, color: Colors.black26),
-          const Center(
-            child: CircularProgressIndicator(color: AppColors.primary),
-          ),
+          if (_isLoading) ...[
+            const ModalBarrier(dismissible: false, color: Colors.black26),
+            const Center(
+              child: CircularProgressIndicator(color: AppColors.primary),
+            ),
+          ],
         ],
-      ],
+      ),
     );
   }
 

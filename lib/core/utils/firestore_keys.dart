@@ -29,6 +29,9 @@ class FsCol {
   // 계정 삭제 요청 컬렉션 (교사 → Cloud Function 트리거용)
   static const String deleteRequests   = 'delete_requests';
 
+  // 비밀번호 초기화 요청 컬렉션 (교사 → Cloud Function 트리거용)
+  static const String passwordResets   = 'password_resets';
+
   // 구직 공고 댓글/대댓글 컬렉션
   static const String jobComments      = 'job_comments';
 
@@ -70,8 +73,10 @@ class FsUser {
   static const String createdAt     = 'created_at';
   static const String fcmToken      = 'fcm_token';  // FCM 푸시 토큰 (앱 실행 시 갱신)
   // Cloud Functions에서 is_temp_password: true 시 자동 생성 (관리자 전달용)
-  static const String tempPwPlain   = 'temp_pw_plain';
-  static const String tempPwAt      = 'temp_pw_at';
+  static const String tempPwPlain        = 'temp_pw_plain';
+  static const String tempPwAt           = 'temp_pw_at';
+  // 비밀번호 초기화 후 강제 변경 플래그 (초기화 시 true, 변경 완료 후 false)
+  static const String needPasswordChange = 'need_password_change';
   // 가입 경로: 'email' | 'google' | 'kakao' 등 (미설정 시 email로 간주)
   static const String loginType     = 'login_type';
   // 당월 조퇴/결석 카운트 (매월 1일 자동 리셋 예정)

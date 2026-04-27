@@ -107,7 +107,7 @@ class _InstructorHomeTabState extends State<InstructorHomeTab>
             '${now.month.toString().padLeft(2, '0')}'
             '${now.day.toString().padLeft(2, '0')}';
         _pendingStudents = pendingSnap.docs.where((doc) {
-          final data = doc.data() as Map<String, dynamic>;
+          final data = doc.data();
           final ca = data[FsUser.createdAt] as String? ?? '';
           return ca.startsWith(todayPrefix);
         }).toList();
@@ -556,41 +556,6 @@ class _CourseCard extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────
-// 섹션 카드 공통 컨테이너 (파란 헤더 + 흰 본문)
-// ─────────────────────────────────────────────────────────
-class _SectionCard extends StatelessWidget {
-  final String title;
-  final Widget child;
-  const _SectionCard({required this.title, required this.child});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 10, offset: const Offset(0, 4))],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            decoration: const BoxDecoration(
-              color: Color(0xFF1565C0),
-              borderRadius: BorderRadius.only(topLeft: Radius.circular(14), topRight: Radius.circular(14)),
-            ),
-            child: Text(title,
-                style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700)),
-          ),
-          Padding(padding: const EdgeInsets.all(12), child: child),
-        ],
-      ),
-    );
-  }
-}
 
 // ─────────────────────────────────────────────────────────
 // 승인 대기 학생 목록 타일
@@ -769,7 +734,7 @@ class _StudentApprovalDialogState extends State<_StudentApprovalDialog> {
               Semantics(
                 label: '강좌 선택',
                 child: DropdownButtonFormField<String>(
-                  value: _selectedCourseId.isEmpty ? null : _selectedCourseId,
+                  initialValue: _selectedCourseId.isEmpty ? null : _selectedCourseId,
                   decoration: const InputDecoration(
                     labelText: '배정할 반',
                     border: OutlineInputBorder(),
@@ -1013,7 +978,7 @@ class _StudentManagementDialogState extends State<_StudentManagementDialog> {
         .where(FsUser.courseId, isEqualTo: widget.courseId)
         .get();
     final students = snap.docs.where((d) {
-      final data = d.data() as Map<String, dynamic>;
+      final data = d.data();
       return (data[FsUser.role] as String?) == FsUser.roleStudent &&
           (data[FsUser.status] as String?) == FsUser.statusApproved &&
           !((data[FsUser.isDeleted] as bool?) ?? false);

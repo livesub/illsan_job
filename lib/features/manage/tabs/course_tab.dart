@@ -34,7 +34,7 @@ class _CourseTabState extends State<CourseTab> {
   static const Color _blue = Color(0xFF1565C0);
 
   List<QueryDocumentSnapshot> _allCourses = [];
-  List<QueryDocumentSnapshot> _filteredCourses = [];
+
   List<QueryDocumentSnapshot> _pagedCourses = [];
   final TextEditingController _searchCtrl = TextEditingController();
   String? _statusFilter;
@@ -118,7 +118,6 @@ class _CourseTabState extends State<CourseTab> {
       }).toList();
     }
 
-    _filteredCourses = filtered;
     final start = (_currentPage - 1) * _pageSize;
     final end = start + _pageSize;
     setState(() {
@@ -168,27 +167,6 @@ class _CourseTabState extends State<CourseTab> {
     if (result == true) await _loadAllCourses();
   }
 
-  // 강좌 종료 처리
-  Future<void> _showCloseConfirm(QueryDocumentSnapshot doc) async {
-    // ... 기존과 동일 (생략하지 않고 코드 보존)
-    final data = doc.data() as Map<String, dynamic>;
-    final name = data[FsCourse.name] as String? ?? '이 강좌';
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('강좌 종료'),
-        content: Text('"$name" 강좌를 종료 처리하시겠습니까?'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('취소')),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('종료 처리')),
-        ],
-      ),
-    );
-    if (confirmed != true) return;
-    await FirebaseFirestore.instance.collection(FsCol.courses).doc(doc.id).update({FsCourse.status: FsCourse.statusClosed});
-    _loadAllCourses();
-  }
-
   // 강좌 삭제 처리
   Future<void> _showDeleteConfirm(QueryDocumentSnapshot doc) async {
     final confirmed = await showDialog<bool>(
@@ -232,7 +210,7 @@ class _CourseTabState extends State<CourseTab> {
                 style: ElevatedButton.styleFrom(backgroundColor: canCreate ? _blue : Colors.grey, foregroundColor: Colors.white, minimumSize: Size.zero, padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),),
                 onPressed: canCreate ? _showAddDialog : null,
                 icon: const Icon(Icons.add_rounded),
-                label: Text('강좌 개설 (${_activeTeacherCount}명)'),
+                label: Text('강좌 개설 ($_activeTeacherCount명)'),
               ),
             ],
           ),
@@ -321,7 +299,6 @@ class _CourseFormDialogState extends State<_CourseFormDialog> {
   String? _selectedTeacherId;
   String? _selectedTeacherName;
   DateTime? _endDate;
-  bool _loadingTeachers = true;
   bool _saving = false;
 
   bool get _isEdit => widget.editDoc != null;
@@ -384,11 +361,8 @@ class _CourseFormDialogState extends State<_CourseFormDialog> {
       if (!mounted) return;
       setState(() {
         _teachers = snap.docs.map((d) => {'uid': d.id, 'name': d.data()[FsUser.name] as String? ?? ''}).toList();
-        _loadingTeachers = false;
       });
-    } catch (e) {
-      if (mounted) setState(() => _loadingTeachers = false);
-    }
+    } catch (_) {}
   }
 
   Future<void> _pickEndDate() async {
@@ -543,7 +517,7 @@ class _CourseFormDialogState extends State<_CourseFormDialog> {
 
   Widget _buildTeacherDropdown() {
     return DropdownButtonFormField<String>(
-      value: _selectedTeacherId,
+      initialValue: _selectedTeacherId,
       items: _teachers.map((t) => DropdownMenuItem(value: t['uid'], child: Text(t['name']!))).toList(),
       onChanged: (val) {
         setState(() {

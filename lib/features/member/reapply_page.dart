@@ -184,7 +184,7 @@ class _ReapplyPageState extends State<ReapplyPage> {
                                     color: AppColors.textSecondary),
                               )
                             : DropdownButtonFormField<String>(
-                                value: _selectedCourseId,
+                                initialValue: _selectedCourseId,
                                 isExpanded: true,
                                 decoration: InputDecoration(
                                   labelText: '수강 과정 선택',

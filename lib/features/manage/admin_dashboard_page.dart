@@ -86,7 +86,6 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
       context,
       MaterialPageRoute(builder: (_) => const InstructorProfilePage()),
     ).then((_) {
-      // 마이페이지에서 사진 변경 후 돌아오면 갱신
       if (widget.userRole == UserRole.INSTRUCTOR) _loadInstructorPhoto();
     });
   }
@@ -281,7 +280,7 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                 title: const Text('로그아웃', style: TextStyle(color: Colors.white70, fontSize: 14)),
                 onTap: () async {
                   await FirebaseAuth.instance.signOut();
-                  if (!context.mounted) return;
+                  if (!mounted) return;
                   Navigator.of(context).pushAndRemoveUntil(
                     MaterialPageRoute(
                         builder: (_) => const LoginIntroPage()),

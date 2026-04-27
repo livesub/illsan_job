@@ -4,12 +4,14 @@
 - 언어/주석: 한글 필수. UI 주석 금지. DB/권한/상태 등 핵심 로직만 1줄 개조식.
 - 권한/접근성: Enum 필수(문자열 비교 금지), 위젯 Semantics 필수.
 - 폴더: lib/core, features 유지 (임의 생성 금지).
-- 코드 작성:
+- 코드 작성 (Lint 및 품질 보장):
+  - Warning 0개 유지 (`flutter analyze` 통과 필수)
+  - 위젯 `const`, 불변 변수 `final` 필수
+  - 비동기(`await`) 후 `if(!mounted) return;` 필수
+  - `unused`, `dead_code` 임의 삭제 절대 금지 (나중 사용을 위해 보존)
   - 미요청 기능/필드/unused 코드 생성 금지
-  - 기존 함수 재사용
-  - null safety 준수
-  - UI 중첩 1 depth 최소화
-  - 사용 import만 포함
+  - 기존 함수 재사용 / null safety 준수
+  - UI 중첩 1 depth 최소화 / 사용 import만 포함
   - pubspec.yaml 수정 금지
   - 주석 기본 금지 (필수 로직만 예외)
 

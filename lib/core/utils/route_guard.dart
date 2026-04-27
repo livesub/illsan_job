@@ -75,12 +75,13 @@ class _RoleRouterState extends State<_RoleRouter> {
           return const _Loading();
         }
 
-        final roleStr   = data[FsUser.role]      as String? ?? FsUser.roleStudent;
-        final userName  = data[FsUser.name]      as String? ?? '';
-        final status    = data[FsUser.status]    as String? ?? FsUser.statusPending;
-        final isDeleted = data[FsUser.isDeleted] as bool?   ?? false;
-        final isTempPw  = data[FsUser.isTempPw]  as bool?   ?? false;
-        final role      = roleStr.toUserRole();
+        final roleStr        = data[FsUser.role]               as String? ?? FsUser.roleStudent;
+        final userName       = data[FsUser.name]               as String? ?? '';
+        final status         = data[FsUser.status]             as String? ?? FsUser.statusPending;
+        final isDeleted      = data[FsUser.isDeleted]          as bool?   ?? false;
+        final isTempPw       = data[FsUser.isTempPw]           as bool?   ?? false;
+        final needPwChange   = data[FsUser.needPasswordChange] as bool?   ?? false;
+        final role           = roleStr.toUserRole();
 
         // 삭제 계정 차단
         if (isDeleted) {
@@ -93,8 +94,8 @@ class _RoleRouterState extends State<_RoleRouter> {
           return const PendingPage();
         }
 
-        // 임시 비밀번호 → 강제 변경
-        if (isTempPw) {
+        // 임시 비밀번호 또는 비밀번호 초기화 → 강제 변경
+        if (isTempPw || needPwChange) {
           return ChangePasswordPage(userRole: role, userName: userName);
         }
 
