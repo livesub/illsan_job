@@ -18,6 +18,7 @@ class _StudentOutingTabState extends State<StudentOutingTab> {
 
   List<OutingModel> _outings = [];
   bool _loading = true;
+  String _teacherName = '';
 
   @override
   void initState() {
@@ -41,8 +42,23 @@ class _StudentOutingTabState extends State<StudentOutingTab> {
       if (tb == null) return -1;
       return tb.seconds.compareTo(ta.seconds);
     });
+    final outings = docs.map(OutingModel.fromDoc).toList();
+
+    // 승인된 외출의 담당 교사명 조회
+    String teacherName = '';
+    final approvedList = outings.where((o) => o.status == FsOuting.statusApproved).toList();
+    if (approvedList.isNotEmpty && approvedList.first.courseId.isNotEmpty) {
+      final courseDoc = await FirebaseFirestore.instance
+          .collection(FsCol.courses)
+          .doc(approvedList.first.courseId)
+          .get();
+      if (!mounted) return;
+      teacherName = (courseDoc.data()?[FsCourse.teacherName] as String?) ?? '';
+    }
+
     setState(() {
-      _outings = docs.map(OutingModel.fromDoc).toList();
+      _outings = outings;
+      _teacherName = teacherName;
       _loading = false;
     });
   }
@@ -384,189 +400,99 @@ class _StudentOutingTabState extends State<StudentOutingTab> {
     );
   }
 
-  // 최신 승인 건: 종이 외출증 형태 카드
+  // 최신 승인 건: (외출·외박) 허가증 형태 카드
   Widget _buildOutingCertificate(OutingModel m) {
-    String fmtMdHm(DateTime dt) =>
-        '${dt.month}월 ${dt.day}일 ${dt.hour.toString().padLeft(2, '0')}시 '
-        '${dt.minute.toString().padLeft(2, '0')}분';
-
-    Widget labelCell(String label) => Container(
-          width: 64,
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 10),
-          decoration: const BoxDecoration(
-              border: Border(right: BorderSide(color: Colors.black38))),
-          alignment: Alignment.center,
-          child: Text(label,
-              style: const TextStyle(fontSize: 12, color: Color(0xFF333333)),
-              textAlign: TextAlign.center),
-        );
-
-    Widget tableRow(Widget child) => DecoratedBox(
-          decoration: const BoxDecoration(
-              border: Border(bottom: BorderSide(color: Colors.black26, width: 0.8))),
-          child: child,
-        );
+    String pad2(int v) => v.toString().padLeft(2, '0');
 
     return Semantics(
       label: '승인된 외출증: ${m.userName}, 사유: ${m.reason}',
       child: Container(
         margin: const EdgeInsets.only(bottom: 20),
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
         decoration: BoxDecoration(
-          color: const Color(0xFFFFFDE7),
+          color: Colors.white,
           border: Border.all(color: Colors.black87, width: 1.5),
           borderRadius: BorderRadius.circular(4),
           boxShadow: [
             BoxShadow(
-                color: Colors.black.withValues(alpha: 0.18),
-                blurRadius: 10,
-                offset: const Offset(3, 5)),
+              color: Colors.black.withValues(alpha: 0.12),
+              blurRadius: 8,
+              offset: const Offset(2, 4),
+            ),
           ],
         ),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // 헤더: 로고 | 외출증 | 지도교사
-            tableRow(Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: const BoxDecoration(
-                      border: Border(right: BorderSide(color: Colors.black87))),
-                  child: const Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.accessibility_new_rounded,
-                          size: 24, color: Color(0xFF1565C0)),
-                      SizedBox(height: 2),
-                      Text('한국장애인\n고용공단',
-                          style: TextStyle(fontSize: 7, color: Color(0xFF555555)),
-                          textAlign: TextAlign.center),
-                    ],
-                  ),
+            const Center(
+              child: Text(
+                '( 외 출 · 외 박 )  허  가  증',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 1,
                 ),
-                const Expanded(
-                  child: Center(
-                    child: Text('외  출  증',
-                        style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: 6,
-                            color: Color(0xFF1A1A2E))),
-                  ),
-                ),
-                Container(
-                  width: 72,
-                  padding: const EdgeInsets.all(8),
-                  decoration: const BoxDecoration(
-                      border: Border(left: BorderSide(color: Colors.black87))),
-                  child: const Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('지도교사',
-                          style: TextStyle(fontSize: 10, color: Color(0xFF555555))),
-                      SizedBox(height: 24),
-                    ],
-                  ),
-                ),
-              ],
-            )),
-            // 성명 | 직종
-            tableRow(Row(
-              children: [
-                labelCell('성  명'),
-                Expanded(
-                  child: DecoratedBox(
-                    decoration: const BoxDecoration(
-                        border: Border(right: BorderSide(color: Colors.black38))),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-                      child: Text(m.userName,
-                          style: const TextStyle(fontSize: 13)),
-                    ),
-                  ),
-                ),
-                labelCell('직  종'),
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-                    child: Text(m.jobType,
-                        style: const TextStyle(fontSize: 13)),
-                  ),
-                ),
-              ],
-            )),
-            // 사유
-            tableRow(Row(
-              children: [
-                labelCell('사  유'),
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-                    child: Text(m.reason,
-                        style: const TextStyle(fontSize: 13), softWrap: true),
-                  ),
-                ),
-              ],
-            )),
-            // 기간
-            tableRow(Row(
-              children: [
-                labelCell('기  간'),
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-                    child: Text(
-                      '${fmtMdHm(m.startTime)}  ~  ${fmtMdHm(m.endTime)}',
-                      style: const TextStyle(fontSize: 13),
-                      softWrap: true,
-                    ),
-                  ),
-                ),
-              ],
-            )),
-            // 연락처
-            tableRow(Row(
-              children: [
-                labelCell('연 락 처'),
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-                    child: Text('휴대폰: ${m.contact}',
-                        style: const TextStyle(fontSize: 13)),
-                  ),
-                ),
-              ],
-            )),
-            // 하단: 날짜 + 인
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    '${m.startTime.year}년  ${m.startTime.month}월  ${m.startTime.day}일',
-                    style: const TextStyle(fontSize: 13),
-                  ),
-                  Row(
-                    children: [
-                      const Text('지도교사',
-                          style: TextStyle(fontSize: 12, color: Color(0xFF555555))),
-                      const SizedBox(width: 16),
-                      Container(
-                        width: 34,
-                        height: 34,
-                        decoration: BoxDecoration(
-                            border: Border.all(color: Colors.black38),
-                            shape: BoxShape.circle),
-                        alignment: Alignment.center,
-                        child: const Text('인',
-                            style: TextStyle(
-                                fontSize: 12, color: Colors.black38)),
-                      ),
-                    ],
-                  ),
-                ],
               ),
+            ),
+            const SizedBox(height: 28),
+            Row(children: [
+              const Text('1. 직  종 : ', style: TextStyle(fontSize: 14)),
+              Expanded(child: Text(m.jobType, style: const TextStyle(fontSize: 14))),
+              const SizedBox(width: 8),
+              const Text('2. 성  명 : ', style: TextStyle(fontSize: 14)),
+              Expanded(child: Text(m.userName, style: const TextStyle(fontSize: 14))),
+            ]),
+            const SizedBox(height: 14),
+            Row(children: [
+              const Text('3. 호  실 : ', style: TextStyle(fontSize: 14)),
+              const Expanded(child: SizedBox()),
+              const SizedBox(width: 8),
+              const Text('(전 화)  ', style: TextStyle(fontSize: 14)),
+              Expanded(child: Text(m.contact, style: const TextStyle(fontSize: 14))),
+            ]),
+            const SizedBox(height: 14),
+            Row(children: [
+              const Text('4. 사  유 : ', style: TextStyle(fontSize: 14)),
+              Expanded(
+                child: Text(m.reason, style: const TextStyle(fontSize: 14), softWrap: true),
+              ),
+            ]),
+            const SizedBox(height: 14),
+            Row(children: [
+              const Text('5. 기  간 : ', style: TextStyle(fontSize: 14)),
+              Expanded(
+                child: Text(
+                  '${m.startTime.month}월 ${m.startTime.day}일 ${pad2(m.startTime.hour)}시부터'
+                  '  ${m.endTime.month}월 ${m.endTime.day}일 ${pad2(m.endTime.hour)}시까지',
+                  style: const TextStyle(fontSize: 14),
+                  softWrap: true,
+                ),
+              ),
+            ]),
+            const SizedBox(height: 28),
+            const Center(
+              child: Text(
+                '위와 같은 사유로 (외출·외박)을 허가함',
+                style: TextStyle(fontSize: 14),
+              ),
+            ),
+            const SizedBox(height: 22),
+            Center(
+              child: Text(
+                '${m.startTime.year}년  ${m.startTime.month}월  ${m.startTime.day}일',
+                style: const TextStyle(fontSize: 14),
+              ),
+            ),
+            const SizedBox(height: 22),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Text('담 당 교 사', style: TextStyle(fontSize: 14)),
+                const SizedBox(width: 12),
+                Text(_teacherName, style: const TextStyle(fontSize: 14)),
+                const SizedBox(width: 8),
+                Container(width: 64, height: 1, color: Colors.black54),
+              ],
             ),
           ],
         ),

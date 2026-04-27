@@ -652,51 +652,6 @@ class _NoticeFormDialogState extends State<_NoticeFormDialog> {
     }
   }
 
-  // 공지유형 → FCM topic 매핑 후 fcm_tasks 컬렉션에 write
-  // Cloud Function onFcmTaskCreated 가 Admin SDK로 topic 발송 처리
-  Future<void> _sendPushNotification(String noticeTitle) async {
-    try {
-      // 공지유형 → topic 변환 (클라이언트 FCM 직접 호출 불가 → Firestore write 방식)
-      String topic;
-      if (_target == FsNotice.targetTeachers) {
-        topic = 'role_INSTRUCTOR';
-      } else if (_target == FsNotice.targetStudents) {
-        topic = 'role_STUDENT';
-      } else if (_target == FsNotice.targetCourse) {
-        // 특정 강좌 수강생 대상 — courseId 미선택 시 발송 중단
-        if (_selectedCourseId == null || _selectedCourseId!.isEmpty) {
-          debugPrint('[FCM] ❌ targetCourse인데 courseId 없음 → 발송 중단');
-          return;
-        }
-        topic = 'course_$_selectedCourseId';
-      } else if (_target == FsNotice.targetCourseAll) {
-        // 담당 반 전체: CF가 authorId로 강좌 목록 조회 후 각 course_* topic 발송
-        topic = 'courseAll';
-      } else {
-        // FsNotice.targetAll (전체)
-        topic = 'all';
-      }
-
-      debugPrint('[FCM] 발송 요청 시작 → target: $_target | topic: $topic | title: $noticeTitle');
-
-      // Firestore fcm_tasks write → Cloud Function이 Admin SDK로 FCM topic 발송
-      final docRef = await FirebaseFirestore.instance.collection('fcm_tasks').add({
-        'topic':     topic,
-        'title':     '새 공지사항: $noticeTitle',
-        'body':      'Job 알리미에 새로운 공지사항이 등록되었습니다.',
-        'target':    _target,
-        'courseId':  _selectedCourseId,
-        'authorId':  widget.authorUid,
-        'status':    'pending',
-        'createdAt': FieldValue.serverTimestamp(),
-      });
-
-      debugPrint('[FCM] ✅ fcm_tasks 저장 완료 → docId: ${docRef.id} | topic: $topic');
-    } catch (e) {
-      debugPrint('[FCM] ❌ 발송 요청 실패: $e');
-    }
-  }
-
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
     if (_target == FsNotice.targetCourse && _selectedCourseId == null) {
@@ -733,9 +688,6 @@ class _NoticeFormDialogState extends State<_NoticeFormDialog> {
           FsNotice.createdAt:  StoragePath.nowCreatedAt(),
         });
 
-        // 🌟 [푸시 알림 발송] 공지 신규 등록이 성공적으로 완료되면 백그라운드에서 푸시를 발송합니다.
-        // 수정(_isEdit)일 때는 알림이 가지 않도록 새 글 등록일 때만 호출합니다.
-        _sendPushNotification(_titleCtrl.text.trim());
       }
       if (!mounted) return;
 

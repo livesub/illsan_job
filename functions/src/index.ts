@@ -169,9 +169,16 @@ export const onNoticeCreated = onDocumentCreated(
     const authorId = data['author_id'] as string | undefined;
     const courseId = data['course_id'] as string | undefined;
     const title    = (data['title']    as string | undefined) ?? '새 공지사항';
-    const rawBody  = (data['content']  as string | undefined) ?? '';
-    // HTML 태그 제거 후 최대 100자 미리보기
-    const body = rawBody.replace(/<[^>]+>/g, '').substring(0, 100);
+    const rawBody = (data['content'] as string | undefined) ?? '';
+    // Quill Delta JSON → 순수 텍스트 변환
+    let body = '';
+    try {
+      const delta = JSON.parse(rawBody) as Array<{insert?: unknown}>;
+      body = delta.map(op => typeof op.insert === 'string' ? op.insert : '').join('');
+    } catch (_) {
+      body = rawBody;
+    }
+    body = body.replace(/\n+/g, ' ').trim().substring(0, 100);
 
     // 서버 시간 created_at 덮어쓰기 (yymmddHis)
     await event.data!.ref.update({ created_at: _formatCreatedAt(new Date()) });

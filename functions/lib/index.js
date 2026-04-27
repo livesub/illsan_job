@@ -6,7 +6,7 @@
 //   - is_deleted: true→false   → Firebase Auth 계정 재활성화
 //   - is_temp_password false→true → 임시 비밀번호 생성 후 Auth 업데이트 + Firestore 저장
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.onNoticeCreated = exports.onStudentDeleteRequested = exports.onUserDocumentUpdated = void 0;
+exports.onNoticeCreated = exports.onStudentDeleteRequested = exports.onPasswordResetRequested = exports.onUserDocumentUpdated = void 0;
 const firestore_1 = require("firebase-functions/v2/firestore");
 const admin = require("firebase-admin");
 admin.initializeApp();
@@ -31,12 +31,26 @@ exports.onUserDocumentUpdated = (0, firestore_1.onDocumentUpdated)('users/{uid}'
         }
     }
     // ── 임시 비밀번호 생성 및 적용 ──────────────────────────
-    // ① temp_pw_plain 변경: 제공된 값으로 Auth 업데이트 + 비밀번호 변경 필요 플래그 설정
-    // ② is_temp_password false→true이고 temp_pw_plain 없음: 자동 생성 후 Firestore 역기록
+    // ① need_password_change false→true: 고정 임시 비밀번호 'Temppw123!' 적용 (학생 초기화)
+    // ② temp_pw_plain 변경: 제공된 값으로 Auth 업데이트 + is_temp_password 플래그 설정
+    // ③ is_temp_password false→true이고 temp_pw_plain 없음: 자동 생성 후 Firestore 역기록
+    const needPwChange = before['need_password_change'] !== true && after['need_password_change'] === true;
     const beforePlain = ((_c = before['temp_pw_plain']) !== null && _c !== void 0 ? _c : '').trim();
     const afterPlain = ((_d = after['temp_pw_plain']) !== null && _d !== void 0 ? _d : '').trim();
     const isTempActivated = before['is_temp_password'] !== true && after['is_temp_password'] === true;
-    if (afterPlain.length > 0 && beforePlain !== afterPlain) {
+    if (needPwChange) {
+        const fixedTempPw = 'Temppw123!';
+        try {
+            await admin.auth().updateUser(uid, { password: fixedTempPw });
+            fsUpdates['temp_pw_plain'] = fixedTempPw;
+            fsUpdates['temp_pw_at'] = admin.firestore.FieldValue.serverTimestamp();
+            console.log(`임시 비밀번호(고정) 적용: ${uid}`);
+        }
+        catch (e) {
+            console.error(`임시 비밀번호 적용 실패: ${uid}`, e);
+        }
+    }
+    else if (afterPlain.length > 0 && beforePlain !== afterPlain) {
         try {
             await admin.auth().updateUser(uid, { password: afterPlain });
             fsUpdates['is_temp_password'] = true;
@@ -63,6 +77,47 @@ exports.onUserDocumentUpdated = (0, firestore_1.onDocumentUpdated)('users/{uid}'
     if (Object.keys(fsUpdates).length > 0) {
         await event.data.after.ref.update(fsUpdates);
     }
+});
+// ── 학생 비밀번호 초기화: Auth 삭제 → 재생성 → Firestore 문서 이전 ──
+// password_resets/{reqId} 생성 시 트리거
+// payload: { student_uid, email, temp_password }
+exports.onPasswordResetRequested = (0, firestore_1.onDocumentCreated)('password_resets/{reqId}', async (event) => {
+    var _a, _b, _c, _d;
+    const data = (_a = event.data) === null || _a === void 0 ? void 0 : _a.data();
+    const studentUid = (_b = data === null || data === void 0 ? void 0 : data['student_uid']) !== null && _b !== void 0 ? _b : '';
+    const email = (_c = data === null || data === void 0 ? void 0 : data['email']) !== null && _c !== void 0 ? _c : '';
+    const tempPw = (_d = data === null || data === void 0 ? void 0 : data['temp_password']) !== null && _d !== void 0 ? _d : '';
+    if (!studentUid || !email || !tempPw)
+        return;
+    const db = admin.firestore();
+    const oldDocRef = db.collection('users').doc(studentUid);
+    const oldDoc = await oldDocRef.get();
+    if (!oldDoc.exists) {
+        await event.data.ref.update({ status: 'error', error: 'user_not_found' });
+        return;
+    }
+    const oldData = oldDoc.data();
+    // 기존 Auth 삭제 (없으면 무시)
+    try {
+        await admin.auth().deleteUser(studentUid);
+    }
+    catch (_) { }
+    // 새 Auth 계정 생성
+    let newUid;
+    try {
+        const newUser = await admin.auth().createUser({ email, password: tempPw });
+        newUid = newUser.uid;
+    }
+    catch (e) {
+        await event.data.ref.update({ status: 'error', error: String(e) });
+        return;
+    }
+    // 새 users/{newUid} 문서 생성 (기존 데이터 + 초기화 필드)
+    await db.collection('users').doc(newUid).set(Object.assign(Object.assign({}, oldData), { need_password_change: true, temp_pw_plain: tempPw, temp_pw_at: admin.firestore.FieldValue.serverTimestamp() }));
+    // 기존 users/{oldUid} 문서 삭제
+    await oldDocRef.delete();
+    // 완료 표시
+    await event.data.ref.update({ status: 'done' });
 });
 // ── 학생 계정 완전 삭제 (교사 거절 처리) ─────────────────
 // delete_requests/{uid} 문서 생성 시 트리거됩니다.
@@ -102,8 +157,16 @@ exports.onNoticeCreated = (0, firestore_1.onDocumentCreated)('notices/{noticeId}
     const courseId = data['course_id'];
     const title = (_b = data['title']) !== null && _b !== void 0 ? _b : '새 공지사항';
     const rawBody = (_c = data['content']) !== null && _c !== void 0 ? _c : '';
-    // HTML 태그 제거 후 최대 100자 미리보기
-    const body = rawBody.replace(/<[^>]+>/g, '').substring(0, 100);
+    // Quill Delta JSON → 순수 텍스트 변환
+    let body = '';
+    try {
+        const delta = JSON.parse(rawBody);
+        body = delta.map(op => typeof op.insert === 'string' ? op.insert : '').join('');
+    }
+    catch (_) {
+        body = rawBody;
+    }
+    body = body.replace(/\n+/g, ' ').trim().substring(0, 100);
     // 서버 시간 created_at 덮어쓰기 (yymmddHis)
     await event.data.ref.update({ created_at: _formatCreatedAt(new Date()) });
     if (!target || !authorId)

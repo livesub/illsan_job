@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import '../../core/enums/user_role.dart';
 import '../../core/utils/firestore_keys.dart';
 import '../manage/admin_dashboard_page.dart';
@@ -76,6 +77,10 @@ class _LoginPageState extends State<LoginPage> {
         return;
       }
 
+      // FCM 토큰 저장 (알림 수신용)
+      await _saveFcmToken(uid);
+      if (!mounted) return;
+
       // 승인 대기 → 전용 대기 화면
       if (status == FsUser.statusPending) {
         if (!mounted) return;
@@ -129,6 +134,18 @@ class _LoginPageState extends State<LoginPage> {
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  Future<void> _saveFcmToken(String uid) async {
+    try {
+      await FirebaseMessaging.instance.requestPermission();
+      final token = await FirebaseMessaging.instance.getToken();
+      if (token == null) return;
+      await FirebaseFirestore.instance
+          .collection(FsCol.users)
+          .doc(uid)
+          .update({FsUser.fcmToken: token});
+    } catch (_) {}
   }
 
   void _go(Widget page) {
